@@ -1,3 +1,3 @@
 open Essentials
 
-let () = Chapter2.run ()
+let () = Chapter2_passes.run ()

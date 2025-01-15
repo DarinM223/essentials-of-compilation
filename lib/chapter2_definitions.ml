@@ -6,6 +6,36 @@ module type R1 = sig
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
 
+module R1_T (X : Chapter1.TRANS) (F : R1 with type 'a exp = 'a X.from) = struct
+  include Chapter1.R0_T (X) (F)
+  open X
+  type 'a var = 'a F.var
+  let var v = fwd @@ F.var v
+  let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
+end
+
+module R1_Partial (F : R1) = struct
+  module M = Chapter1.R0_Partial_Pass (F)
+  include R1_T (M.X) (F)
+  include M.IDelta
+end
+
+module R1_Pretty = struct
+  include Chapter1.R0_Pretty
+  type 'a var = string
+  let var v = "(var " ^ v ^ ")"
+
+  let fresh =
+    let c = ref (-1) in
+    fun () ->
+      incr c;
+      !c
+
+  let ( let* ) e f =
+    let v = "tmp" ^ string_of_int (fresh ()) in
+    "(let ([" ^ v ^ " " ^ e ^ "]) " ^ f v ^ ")"
+end
+
 module R1_Interp = struct
   type 'a typ =
     | TInt : int typ
@@ -114,4 +144,8 @@ let run () =
   Format.printf "Ex2: Result: %d Expected: %d\n" M.res M.check;
   (* Enter 52, then 10, should produce 42, not -42 *)
   let module M = Ex3 (R1_Interp) in
-  Format.printf "Ex3: %d\n" M.res
+  Format.printf "Ex3: %d\n" M.res;
+  let module M = Ex1 (R1_Partial (R1_Interp)) in
+  Format.printf "Ex1 with partial pass: %d\n" M.res;
+  let module M = Ex3 (R1_Pretty) in
+  Format.printf "Ex3 pretty: %s\n" M.res
