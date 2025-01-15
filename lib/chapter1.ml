@@ -135,17 +135,17 @@ end
 module Ex1 (F : R0) = struct
   open F
 
-  let res = program @@ (read () + neg (int 5 + int 3))
+  let res = program (read () + neg (int 5 + int 3))
 end
 
 module Ex2 (F : R0) = struct
   open F
-  let res = program @@ (int 1 + (read () + int 1))
+  let res = program (int 1 + (read () + int 1))
 end
 
 module Ex3 (F : R0) = struct
   open F
-  let res = program @@ (int 4 + neg (read () + int 2) + neg (int 3))
+  let res = program (int 4 + neg (read () + int 2) + neg (int 3))
 end
 
 let run () =
