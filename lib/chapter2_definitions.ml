@@ -97,6 +97,33 @@ module R1_Interp = struct
     result
 end
 
+module type C0 = sig
+  type var = string
+
+  type 'a arg
+
+  val int : int -> int arg
+  val var : var -> 'a arg
+
+  type 'a exp
+
+  val arg : 'a arg -> 'a exp
+  val read : unit -> int exp
+  val neg : int arg -> int exp
+  val ( + ) : int arg -> int arg -> int exp
+
+  type stmt
+  val assign : var -> 'a exp -> stmt
+
+  type tail
+  val return : 'a exp -> tail
+  val ( @> ) : stmt -> tail -> tail
+
+  type program
+  type info = { locals : string list }
+  val program : info -> (string * tail) list -> program
+end
+
 module Ex1 (F : R1) = struct
   open F
 
@@ -135,6 +162,20 @@ module Ex3 (F : R1) = struct
     let* x = read () in
     let* y = read () in
     var x + neg (var y)
+end
+
+module C0_Ex1 (F : C0) = struct
+  open F
+
+  let res =
+    program { locals = [] }
+      [
+        ( "start",
+          assign "x_1" (arg (int 20))
+          @> assign "x_2" (arg (int 22))
+          @> assign "y" (var "x_1" + var "x_2")
+          @> return (arg (var "y")) );
+      ]
 end
 
 let run () =
