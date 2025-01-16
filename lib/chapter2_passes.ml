@@ -52,6 +52,43 @@ module RemoveComplex (F : R1) = struct
   include M.IDelta
 end
 
+module ExplicateControlPass (F : R1) (C0: C0) = struct
+  module X = struct
+    type 'a from = 'a F.exp
+
+    type 'a ann = {
+      bindings: C0.stmt list;
+      exp: 'a C0.exp;
+    }
+    type 'a term = 'a ann * 'a from
+
+    let fwd e = ({ bindings = []; exp = C0.(arg (var "unknown")) }, e)
+    let bwd (_, e) = e
+  end
+  open X
+  module IDelta = struct
+    (* TODO: override R1 functions to annotate with the ann type *)
+
+    let construct_c0 : 'a ann -> C0.program = fun ann ->
+      let start =
+        match ann.bindings with
+        | [] -> C0.return ann.exp
+        | _ -> List.fold_right C0.(@>) ann.bindings (C0.return ann.exp)
+      in
+      C0.program { locals = [] } [("start", start)]
+
+    (* Overrides program to return the transformed program in the C0 language *)
+    type 'a program = C0.program
+    let program (ann, _) = construct_c0 ann
+  end
+end
+
+module ExplicateControl (F: R1) (C0 : C0) = struct
+  module M = ExplicateControlPass (F) (C0)
+  include R1_T (M.X) (F)
+  include M.IDelta
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = program @@

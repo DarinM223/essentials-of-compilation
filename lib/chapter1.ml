@@ -6,8 +6,8 @@ module type R0 = sig
   val neg : int exp -> int exp
   val ( + ) : int exp -> int exp -> int exp
 
+  (* This is similar to 'a obs and observe *)
   type 'a program
-
   val program : 'a exp -> 'a program
 end
 
