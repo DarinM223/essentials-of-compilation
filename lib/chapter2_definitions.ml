@@ -124,6 +124,34 @@ module type C0 = sig
   val program : info -> (string * tail) list -> program
 end
 
+module C0_Pretty = struct
+  type var = string
+  type 'a arg = string
+  let int = string_of_int
+  let var = Fun.id
+
+  type 'a exp = string
+  let arg = Fun.id
+  let read () = "(read)"
+  let neg e = "(neg " ^ e ^ ")"
+  let ( + ) a b = "(+ " ^ a ^ " " ^ b ^ ")"
+
+  type stmt = string
+  let assign v e = "(assign " ^ v ^ " " ^ e ^ ")"
+
+  type tail = string
+  let return e = "(return " ^ e ^ ")"
+  let ( @> ) stmt rest = "(seq " ^ stmt ^ " " ^ rest ^ ")"
+
+  type program = string
+  type info = { locals : string list }
+  let program info body =
+    let locals = String.concat " " info.locals in
+    let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
+    let body = String.concat "\n" (List.map pair body) in
+    "(program ((locals . (" ^ locals ^ "))) (" ^ body ^ ")"
+end
+
 module Ex1 (F : R1) = struct
   open F
 

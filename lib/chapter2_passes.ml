@@ -70,4 +70,6 @@ let run () =
   let module M = Ex4 (RemoveComplex (R1_Pretty)) in
   Format.printf "Ex4: %s\n" M.res;
   let module M = Ex5 (RemoveComplex (R1_Pretty)) in
-  Format.printf "Ex5: %s\n" M.res
+  Format.printf "Ex5: %s\n" M.res;
+  let module M = C0_Ex1 (C0_Pretty) in
+  Format.printf "C0 Ex1: %s\n" M.res
