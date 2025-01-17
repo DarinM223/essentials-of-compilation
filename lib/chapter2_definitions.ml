@@ -3,6 +3,7 @@ module type R1 = sig
 
   type 'a var
   val var : 'a var -> 'a exp
+  val string_of_var : 'a var -> string
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
 
@@ -10,6 +11,7 @@ module R1_T (X : Chapter1.TRANS) (F : R1 with type 'a exp = 'a X.from) = struct
   include Chapter1.R0_T (X) (F)
   open X
   type 'a var = 'a F.var
+  let string_of_var = F.string_of_var
   let var v = fwd @@ F.var v
   let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 end
@@ -23,6 +25,7 @@ end
 module R1_Pretty = struct
   include Chapter1.R0_Pretty
   type 'a var = string
+  let string_of_var v = v
   let var v = "(var " ^ v ^ ")"
 
   let fresh =
@@ -44,6 +47,7 @@ module R1_Interp = struct
 
   type 'a exp = 'a typ * 'a
   type 'a var = 'a typ * int
+  let string_of_var (_, i) = "tmp" ^ string_of_int i
 
   let int x = (TInt, x)
   let read () =

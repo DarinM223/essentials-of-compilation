@@ -56,24 +56,54 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
   module X = struct
     type 'a from = 'a F.exp
 
+    type 'a res = Arg of 'a C0.arg | Exp of 'a C0.exp | Unk
     type 'a ann = {
       bindings: C0.stmt list;
-      exp: 'a C0.exp;
+      result: 'a res
     }
     type 'a term = 'a ann * 'a from
 
-    let fwd e = ({ bindings = []; exp = C0.(arg (var "unknown")) }, e)
+    let fwd e = ({ bindings = []; result = Unk }, e)
     let bwd (_, e) = e
   end
   open X
   module IDelta = struct
-    (* TODO: override R1 functions to annotate with the ann type *)
+    let int i = ({ bindings = []; result = Arg C0.(int i) }, F.int i)
+    let read () = ({ bindings = []; result = Exp (C0.read ()) }, F.read ())
+    let neg (ann, e) =
+      match ann with
+      | { bindings; result = Arg a } -> ({bindings; result = Exp (C0.neg a)}, F.neg e)
+      | { bindings; _ } -> ({bindings; result = Unk}, F.neg e)
+    let (+) (ann1, e1) (ann2, e2) =
+      match (ann1, ann2) with
+      | {bindings = bs1; result = Arg a1}, { bindings = bs2; result = Arg a2} -> ({bindings = bs1 @ bs2; result = Exp C0.(a1 + a2)}, F.(e1 + e2))
+      | {bindings = bs1; _}, {bindings = bs2; _} -> ({bindings = bs1 @ bs2; result = Unk}, F.(e1 + e2))
+
+    let var v = ({ bindings = []; result = Arg (C0.var (F.string_of_var v))}, F.var v)
+
+    let ( let* ) e f =
+      let vRef = ref (fun () -> failwith "empty cell") in
+      let exp = F.( let* ) (bwd e) (fun v -> vRef := (fun () -> v); bwd (f v)) in
+      let v = !vRef () in
+      let binding_stmt = C0.assign (F.string_of_var v)
+        (match (fst e).result with
+         | Arg a -> C0.arg a
+         | Exp e -> e
+         | Unk -> failwith "Expected expression in let*")
+      in
+      let {bindings; result}, _ = f v in
+      ({bindings = (fst e).bindings @ bindings @ [binding_stmt]; result}, exp)
 
     let construct_c0 : 'a ann -> C0.program = fun ann ->
+      let to_stmt = function
+        | Arg a -> C0.(return (arg a))
+        | Exp e -> C0.return e
+        | Unk -> failwith "Unknown type"
+      in
       let start =
         match ann.bindings with
-        | [] -> C0.return ann.exp
-        | _ -> List.fold_right C0.(@>) ann.bindings (C0.return ann.exp)
+        | [] -> to_stmt ann.result
+        | _ -> List.fold_right C0.(@>) ann.bindings (to_stmt ann.result)
       in
       C0.program { locals = [] } [("start", start)]
 
@@ -103,10 +133,23 @@ module Ex5 (F : R1) = struct
     var b
 end
 
+module Ex6 (F : R1) = struct
+  open F
+
+  let res = program @@
+    let* y =
+      let* x = int 20 in
+      var x + (let* x = int 22 in var x)
+    in
+    var y
+end
+
 let run () =
   let module M = Ex4 (RemoveComplex (R1_Pretty)) in
   Format.printf "Ex4: %s\n" M.res;
   let module M = Ex5 (RemoveComplex (R1_Pretty)) in
   Format.printf "Ex5: %s\n" M.res;
   let module M = C0_Ex1 (C0_Pretty) in
-  Format.printf "C0 Ex1: %s\n" M.res
+  Format.printf "C0 Ex1: %s\n" M.res;
+  let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty)) in
+  Format.printf "Ex6: %s\n" M.res
