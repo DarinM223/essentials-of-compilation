@@ -119,6 +119,45 @@ module ExplicateControl (F: R1) (C0 : C0) = struct
   include M.IDelta
 end
 
+module UncoverLocalsPass (F : C0) = struct
+  module MkX (M : sig type 'a t end) = struct
+    type 'a from = 'a M.t
+    type 'a term = string list * 'a from
+    let fwd a = ([], a)
+    let bwd (_, a) = a
+  end
+  module X_arg = MkX(struct type 'a t = 'a F.arg end)
+  module X_exp = MkX(struct type 'a t = 'a F.exp end)
+  module X_stmt = MkX(struct type 'a t = 'a F.stmt end)
+  module X_tail = MkX(struct type 'a t = 'a F.tail end)
+  module X_program = struct
+    type 'a from = 'a F.program
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+
+  module IDelta = struct
+    let var v = ([v], F.var v)
+    let arg (locals, a) = (locals, F.arg a)
+    let neg (locals, a) = (locals, F.neg a)
+    let (+) (l1, a) (l2, b) = (l1 @ l2, F.(a + b))
+    let assign v (locals, e) = (locals, F.assign v e)
+    let return (locals, e) = (locals, F.return e)
+    let ( @> ) (l1, s) (l2, t) = (l1 @ l2, F.(@>) s t)
+    let program _ body =
+      let locals = List.fold_left (fun acc (_, (locals, _)) -> locals @ acc) [] body in
+      let body = List.map (fun (s, t) -> (s, X_tail.bwd t)) body in
+      F.program { locals } body
+  end
+end
+
+module UncoverLocals (F: C0) = struct
+  module M = UncoverLocalsPass (F)
+  include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = program @@
@@ -152,4 +191,6 @@ let run () =
   let module M = C0_Ex1 (C0_Pretty) in
   Format.printf "C0 Ex1: %s\n" M.res;
   let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty)) in
-  Format.printf "Ex6: %s\n" M.res
+  Format.printf "Ex6: %s\n" M.res;
+  let module M = Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty))) in
+  Format.printf "Ex6 with locals: %s\n" M.res

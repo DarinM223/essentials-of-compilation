@@ -145,6 +145,14 @@ module C0_T
          and type 'a tail = 'a X_tail.from
          and type 'a program = 'a X_program.from) =
 struct
+  type var = string
+  type 'a arg = 'a X_arg.term
+  type 'a exp = 'a X_exp.term
+  type 'a stmt = 'a X_stmt.term
+  type 'a tail = 'a X_tail.term
+  type 'a program = 'a X_program.term
+  type info = { locals : string list }
+
   let int i = X_arg.fwd @@ F.int i
   let var v = X_arg.fwd @@ F.var v
   let arg a = X_exp.fwd @@ F.arg @@ X_arg.bwd a
