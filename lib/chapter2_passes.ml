@@ -58,7 +58,7 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
 
     type 'a res = Arg of 'a C0.arg | Exp of 'a C0.exp | Unk
     type 'a ann = {
-      bindings: C0.stmt list;
+      bindings: unit C0.stmt list;
       result: 'a res
     }
     type 'a term = 'a ann * 'a from
@@ -94,7 +94,7 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
       let {bindings; result}, _ = f v in
       ({bindings = (fst e).bindings @ bindings @ [binding_stmt]; result}, exp)
 
-    let construct_c0 : 'a ann -> C0.program = fun ann ->
+    let construct_c0 : 'a ann -> unit C0.program = fun ann ->
       let to_stmt = function
         | Arg a -> C0.(return (arg a))
         | Exp e -> C0.return e
@@ -108,7 +108,7 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
       C0.program { locals = [] } [("start", start)]
 
     (* Overrides program to return the transformed program in the C0 language *)
-    type 'a program = C0.program
+    type 'a program = 'a C0.program
     let program (ann, _) = construct_c0 ann
   end
 end

@@ -116,16 +116,50 @@ module type C0 = sig
   val neg : int arg -> int exp
   val ( + ) : int arg -> int arg -> int exp
 
-  type stmt
-  val assign : var -> 'a exp -> stmt
+  type 'a stmt
+  val assign : var -> 'a exp -> unit stmt
 
-  type tail
-  val return : 'a exp -> tail
-  val ( @> ) : stmt -> tail -> tail
+  type 'a tail
+  val return : 'a exp -> unit tail
+  val ( @> ) : unit stmt -> unit tail -> unit tail
 
-  type program
+  type 'a program
   type info = { locals : string list }
-  val program : info -> (string * tail) list -> program
+  val program : info -> (string * unit tail) list -> unit program
+
+  type 'a obs
+  val observe : 'a program -> 'a obs
+end
+
+module C0_T
+    (X_arg : Chapter1.TRANS)
+    (X_exp : Chapter1.TRANS)
+    (X_stmt : Chapter1.TRANS)
+    (X_tail : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      C0
+        with type 'a arg = 'a X_arg.from
+         and type 'a exp = 'a X_exp.from
+         and type 'a stmt = 'a X_stmt.from
+         and type 'a tail = 'a X_tail.from
+         and type 'a program = 'a X_program.from) =
+struct
+  let int i = X_arg.fwd @@ F.int i
+  let var v = X_arg.fwd @@ F.var v
+  let arg a = X_exp.fwd @@ F.arg @@ X_arg.bwd a
+  let read () = X_exp.fwd @@ F.read ()
+  let neg a = X_exp.fwd @@ F.neg @@ X_arg.bwd a
+  let ( + ) a b = X_exp.fwd F.(X_arg.bwd a + X_arg.bwd b)
+  let assign v e = X_stmt.fwd @@ F.assign v @@ X_exp.bwd e
+  let return e = X_tail.fwd @@ F.return @@ X_exp.bwd e
+  let ( @> ) s t = X_tail.fwd @@ F.( @> ) (X_stmt.bwd s) (X_tail.bwd t)
+  let program info body =
+    X_program.fwd @@ F.program info
+    @@ List.map (fun (s, t) -> (s, X_tail.bwd t)) body
+
+  type 'a obs = 'a F.obs
+  let observe = F.observe
 end
 
 module C0_Pretty = struct
@@ -140,20 +174,23 @@ module C0_Pretty = struct
   let neg e = "(neg " ^ e ^ ")"
   let ( + ) a b = "(+ " ^ a ^ " " ^ b ^ ")"
 
-  type stmt = string
+  type 'a stmt = string
   let assign v e = "(assign " ^ v ^ " " ^ e ^ ")"
 
-  type tail = string
+  type 'a tail = string
   let return e = "(return " ^ e ^ ")"
   let ( @> ) stmt rest = "(seq " ^ stmt ^ " " ^ rest ^ ")"
 
-  type program = string
+  type 'a program = string
   type info = { locals : string list }
   let program info body =
     let locals = String.concat " " info.locals in
     let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
     let body = String.concat "\n" (List.map pair body) in
     "(program ((locals . (" ^ locals ^ "))) (" ^ body ^ ")"
+
+  type 'a obs = string
+  let observe p = p
 end
 
 module Ex1 (F : R1) = struct
