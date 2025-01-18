@@ -120,10 +120,11 @@ module ExplicateControl (F: R1) (C0 : C0) = struct
 end
 
 module UncoverLocalsPass (F : C0) = struct
+  module S = Set.Make (String)
   module MkX (M : sig type 'a t end) = struct
     type 'a from = 'a M.t
-    type 'a term = string list * 'a from
-    let fwd a = ([], a)
+    type 'a term = S.t * 'a from
+    let fwd a = (S.empty, a)
     let bwd (_, a) = a
   end
   module X_arg = MkX(struct type 'a t = 'a F.arg end)
@@ -138,15 +139,19 @@ module UncoverLocalsPass (F : C0) = struct
   end
 
   module IDelta = struct
-    let var v = ([v], F.var v)
+    let var v = (S.singleton v, F.var v)
     let arg (locals, a) = (locals, F.arg a)
     let neg (locals, a) = (locals, F.neg a)
-    let (+) (l1, a) (l2, b) = (l1 @ l2, F.(a + b))
-    let assign v (locals, e) = (locals, F.assign v e)
+    let (+) (l1, a) (l2, b) = (S.union l1 l2, F.(a + b))
+    let assign v (locals, e) = (S.add v locals, F.assign v e)
     let return (locals, e) = (locals, F.return e)
-    let ( @> ) (l1, s) (l2, t) = (l1 @ l2, F.(@>) s t)
+    let ( @> ) (l1, s) (l2, t) = (S.union l1 l2, F.(@>) s t)
     let program _ body =
-      let locals = List.fold_left (fun acc (_, (locals, _)) -> locals @ acc) [] body in
+      let locals =
+        body
+        |> List.fold_left (fun acc (_, (locals, _)) -> S.union locals acc) S.empty
+        |> S.to_list
+      in
       let body = List.map (fun (s, t) -> (s, X_tail.bwd t)) body in
       F.program { locals } body
   end
