@@ -201,6 +201,137 @@ module C0_Pretty = struct
   let observe p = p
 end
 
+module type X86_0 = sig
+  type 'a arg
+  val int : int -> int arg
+  val var : string -> 'a arg
+
+  type label = string
+
+  type 'a instr
+  val addq : int arg -> int arg -> unit instr
+  val subq : int arg -> int arg -> unit instr
+  val movq : 'a arg -> 'a arg -> unit instr
+  val retq : unit instr
+  val negq : int arg -> unit instr
+  val callq : label -> unit instr
+  val pushq : 'a arg -> unit instr
+  val popq : 'a arg -> unit instr
+
+  type 'a block
+  type info
+  val block : info -> unit instr list -> unit block
+
+  type 'a program
+  val program : info -> (label * unit block) list -> unit program
+
+  type 'a obs
+  val observe : 'a program -> 'a obs
+end
+
+module X86_0_T
+    (X_arg : Chapter1.TRANS)
+    (X_instr : Chapter1.TRANS)
+    (X_block : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      X86_0
+        with type 'a arg = 'a X_arg.from
+         and type 'a instr = 'a X_instr.from
+         and type 'a block = 'a X_block.from
+         and type 'a program = 'a X_program.from) =
+struct
+  type 'a arg = 'a X_arg.term
+  type 'a instr = 'a X_instr.term
+  type 'a block = 'a X_block.term
+  type 'a program = 'a X_program.term
+  type label = string
+  type info = F.info
+
+  let int i = X_arg.fwd @@ F.int i
+  let var v = X_arg.fwd @@ F.var v
+
+  let addq a b = X_instr.fwd @@ F.addq (X_arg.bwd a) (X_arg.bwd b)
+  let subq a b = X_instr.fwd @@ F.subq (X_arg.bwd a) (X_arg.bwd b)
+  let movq a b = X_instr.fwd @@ F.movq (X_arg.bwd a) (X_arg.bwd b)
+  let retq = X_instr.fwd F.retq
+  let negq a = X_instr.fwd @@ F.negq @@ X_arg.bwd a
+  let callq l = X_instr.fwd @@ F.callq l
+  let pushq a = X_instr.fwd @@ F.pushq @@ X_arg.bwd a
+  let popq a = X_instr.fwd @@ F.popq @@ X_arg.bwd a
+
+  let block info instrs =
+    X_block.fwd @@ F.block info @@ List.map X_instr.bwd instrs
+
+  let program info blocks =
+    X_program.fwd @@ F.program info
+    @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
+
+  type 'a obs = 'a F.obs
+  let observe = F.observe
+end
+
+module type X86_1 = sig
+  include X86_0
+  type 'a reg
+  val rsp : int reg
+  val rbp : int reg
+  val rax : int reg
+  val rbx : int reg
+  val rcx : int reg
+  val rdx : int reg
+  val rsi : int reg
+  val rdi : int reg
+  val r8 : int reg
+  val r9 : int reg
+  val r10 : int reg
+  val r11 : int reg
+  val r12 : int reg
+  val r13 : int reg
+  val r14 : int reg
+  val r15 : int reg
+
+  val reg : 'a reg -> 'a arg
+  val deref : 'a reg -> int -> 'a arg
+end
+
+module X86_1_T
+    (X_reg : Chapter1.TRANS)
+    (X_arg : Chapter1.TRANS)
+    (X_instr : Chapter1.TRANS)
+    (X_block : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      X86_1
+        with type 'a reg = 'a X_reg.from
+         and type 'a arg = 'a X_arg.from
+         and type 'a instr = 'a X_instr.from
+         and type 'a block = 'a X_block.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include X86_0_T (X_arg) (X_instr) (X_block) (X_program) (F)
+  type 'a reg = 'a X_reg.term
+  let rsp = X_reg.fwd F.rsp
+  let rbp = X_reg.fwd F.rbp
+  let rax = X_reg.fwd F.rax
+  let rbx = X_reg.fwd F.rbx
+  let rcx = X_reg.fwd F.rcx
+  let rdx = X_reg.fwd F.rdx
+  let rsi = X_reg.fwd F.rsi
+  let rdi = X_reg.fwd F.rdi
+  let r8 = X_reg.fwd F.r8
+  let r9 = X_reg.fwd F.r9
+  let r10 = X_reg.fwd F.r10
+  let r11 = X_reg.fwd F.r11
+  let r12 = X_reg.fwd F.r12
+  let r13 = X_reg.fwd F.r13
+  let r14 = X_reg.fwd F.r14
+  let r15 = X_reg.fwd F.r15
+
+  let reg r = X_arg.fwd @@ F.reg @@ X_reg.bwd r
+  let deref r i = X_arg.fwd @@ F.deref (X_reg.bwd r) i
+end
+
 module Ex1 (F : R1) = struct
   open F
 
