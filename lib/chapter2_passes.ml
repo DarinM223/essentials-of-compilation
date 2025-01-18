@@ -24,7 +24,7 @@ module RemoveComplexPass (F : R1) = struct
         let* tmp = (ann, e) in
         (Complex, F.neg (F.var tmp))
     type _ eff += Normalize : ann * 'a from -> 'a from eff
-    let (+) (ann1, e1) (ann2, e2) =
+    let ( + ) (ann1, e1) (ann2, e2) =
       let go () =
         let e1 =
           match ann1 with
@@ -40,7 +40,7 @@ module RemoveComplexPass (F : R1) = struct
       in
       match go () with
       | result -> result
-      | effect (Normalize (ann, e)), k ->
+      | effect Normalize (ann, e), k ->
         let* tmp = (ann, e) in
         Effect.Deep.continue k (F.var tmp)
   end
@@ -52,14 +52,17 @@ module RemoveComplex (F : R1) = struct
   include M.IDelta
 end
 
-module ExplicateControlPass (F : R1) (C0: C0) = struct
+module ExplicateControlPass (F : R1) (C0 : C0) = struct
   module X = struct
     type 'a from = 'a F.exp
 
-    type 'a res = Arg of 'a C0.arg | Exp of 'a C0.exp | Unk
+    type 'a res =
+      | Arg of 'a C0.arg
+      | Exp of 'a C0.exp
+      | Unk
     type 'a ann = {
-      bindings: unit C0.stmt list;
-      result: 'a res
+      bindings : unit C0.stmt list;
+      result : 'a res;
     }
     type 'a term = 'a ann * 'a from
 
@@ -72,29 +75,41 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
     let read () = ({ bindings = []; result = Exp (C0.read ()) }, F.read ())
     let neg (ann, e) =
       match ann with
-      | { bindings; result = Arg a } -> ({bindings; result = Exp (C0.neg a)}, F.neg e)
-      | { bindings; _ } -> ({bindings; result = Unk}, F.neg e)
-    let (+) (ann1, e1) (ann2, e2) =
+      | { bindings; result = Arg a } ->
+        ({ bindings; result = Exp (C0.neg a) }, F.neg e)
+      | { bindings; _ } -> ({ bindings; result = Unk }, F.neg e)
+    let ( + ) (ann1, e1) (ann2, e2) =
       match (ann1, ann2) with
-      | {bindings = bs1; result = Arg a1}, { bindings = bs2; result = Arg a2} -> ({bindings = bs1 @ bs2; result = Exp C0.(a1 + a2)}, F.(e1 + e2))
-      | {bindings = bs1; _}, {bindings = bs2; _} -> ({bindings = bs1 @ bs2; result = Unk}, F.(e1 + e2))
+      | { bindings = bs1; result = Arg a1 }, { bindings = bs2; result = Arg a2 }
+        ->
+        ({ bindings = bs1 @ bs2; result = Exp C0.(a1 + a2) }, F.(e1 + e2))
+      | { bindings = bs1; _ }, { bindings = bs2; _ } ->
+        ({ bindings = bs1 @ bs2; result = Unk }, F.(e1 + e2))
 
-    let var v = ({ bindings = []; result = Arg (C0.var (F.string_of_var v))}, F.var v)
+    let var v =
+      ({ bindings = []; result = Arg (C0.var (F.string_of_var v)) }, F.var v)
 
     let ( let* ) e f =
       let vRef = ref (fun () -> failwith "empty cell") in
-      let exp = F.( let* ) (bwd e) (fun v -> vRef := (fun () -> v); bwd (f v)) in
-      let v = !vRef () in
-      let binding_stmt = C0.assign (F.string_of_var v)
-        (match (fst e).result with
-         | Arg a -> C0.arg a
-         | Exp e -> e
-         | Unk -> failwith "Expected expression in let*")
+      let exp =
+        F.( let* ) (bwd e) (fun v ->
+            (vRef := fun () -> v);
+            bwd (f v))
       in
-      let {bindings; result}, _ = f v in
-      ({bindings = (fst e).bindings @ bindings @ [binding_stmt]; result}, exp)
+      let v = !vRef () in
+      let binding_stmt =
+        C0.assign (F.string_of_var v)
+          (match (fst e).result with
+          | Arg a -> C0.arg a
+          | Exp e -> e
+          | Unk -> failwith "Expected expression in let*")
+      in
+      let { bindings; result }, _ = f v in
+      ( { bindings = (fst e).bindings @ bindings @ [ binding_stmt ]; result },
+        exp )
 
-    let construct_c0 : 'a ann -> unit C0.program = fun ann ->
+    let construct_c0 : 'a ann -> unit C0.program =
+     fun ann ->
       let to_stmt = function
         | Arg a -> C0.(return (arg a))
         | Exp e -> C0.return e
@@ -103,9 +118,9 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
       let start =
         match ann.bindings with
         | [] -> to_stmt ann.result
-        | _ -> List.fold_right C0.(@>) ann.bindings (to_stmt ann.result)
+        | _ -> List.fold_right C0.( @> ) ann.bindings (to_stmt ann.result)
       in
-      C0.program { locals = [] } [("start", start)]
+      C0.program { locals = [] } [ ("start", start) ]
 
     (* Overrides program to return the transformed program in the C0 language *)
     type 'a program = 'a C0.program
@@ -113,7 +128,7 @@ module ExplicateControlPass (F : R1) (C0: C0) = struct
   end
 end
 
-module ExplicateControl (F: R1) (C0 : C0) = struct
+module ExplicateControl (F : R1) (C0 : C0) = struct
   module M = ExplicateControlPass (F) (C0)
   include R1_T (M.X) (F)
   include M.IDelta
@@ -121,16 +136,27 @@ end
 
 module UncoverLocalsPass (F : C0) = struct
   module S = Set.Make (String)
-  module MkX (M : sig type 'a t end) = struct
+  module MkX (M : sig
+    type 'a t
+  end) =
+  struct
     type 'a from = 'a M.t
     type 'a term = S.t * 'a from
     let fwd a = (S.empty, a)
     let bwd (_, a) = a
   end
-  module X_arg = MkX(struct type 'a t = 'a F.arg end)
-  module X_exp = MkX(struct type 'a t = 'a F.exp end)
-  module X_stmt = MkX(struct type 'a t = 'a F.stmt end)
-  module X_tail = MkX(struct type 'a t = 'a F.tail end)
+  module X_arg = MkX (struct
+    type 'a t = 'a F.arg
+  end)
+  module X_exp = MkX (struct
+    type 'a t = 'a F.exp
+  end)
+  module X_stmt = MkX (struct
+    type 'a t = 'a F.stmt
+  end)
+  module X_tail = MkX (struct
+    type 'a t = 'a F.tail
+  end)
   module X_program = struct
     type 'a from = 'a F.program
     type 'a term = 'a from
@@ -142,14 +168,16 @@ module UncoverLocalsPass (F : C0) = struct
     let var v = (S.singleton v, F.var v)
     let arg (locals, a) = (locals, F.arg a)
     let neg (locals, a) = (locals, F.neg a)
-    let (+) (l1, a) (l2, b) = (S.union l1 l2, F.(a + b))
+    let ( + ) (l1, a) (l2, b) = (S.union l1 l2, F.(a + b))
     let assign v (locals, e) = (S.add v locals, F.assign v e)
     let return (locals, e) = (locals, F.return e)
-    let ( @> ) (l1, s) (l2, t) = (S.union l1 l2, F.(@>) s t)
+    let ( @> ) (l1, s) (l2, t) = (S.union l1 l2, F.( @> ) s t)
     let program _ body =
       let locals =
         body
-        |> List.fold_left (fun acc (_, (locals, _)) -> S.union locals acc) S.empty
+        |> List.fold_left
+             (fun acc (_, (locals, _)) -> S.union locals acc)
+             S.empty
         |> S.to_list
       in
       let body = List.map (fun (s, t) -> (s, X_tail.bwd t)) body in
@@ -157,7 +185,7 @@ module UncoverLocalsPass (F : C0) = struct
   end
 end
 
-module UncoverLocals (F: C0) = struct
+module UncoverLocals (F : C0) = struct
   module M = UncoverLocalsPass (F)
   include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
   include M.IDelta
@@ -165,13 +193,14 @@ end
 
 module Ex4 (F : R1) = struct
   open F
-  let res = program @@
-    int 52 + neg (int 10)
+  let res = program @@ (int 52 + neg (int 10))
 end
 
 module Ex5 (F : R1) = struct
   open F
-  let res = program @@
+  let res =
+    program
+    @@
     let* a = int 42 in
     let* b = var a in
     var b
@@ -180,10 +209,14 @@ end
 module Ex6 (F : R1) = struct
   open F
 
-  let res = program @@
+  let res =
+    program
+    @@
     let* y =
       let* x = int 20 in
-      var x + (let* x = int 22 in var x)
+      var x
+      + let* x = int 22 in
+        var x
     in
     var y
 end
