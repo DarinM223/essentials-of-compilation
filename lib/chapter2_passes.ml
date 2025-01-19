@@ -192,17 +192,21 @@ module UncoverLocals (F : C0) = struct
 end
 
 module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
+  type 'a tagged_arg = string option * 'a X86.arg
+  type 'a tagged_exp =
+    | Arg of 'a tagged_arg
+    | Exp of string * 'a tagged_arg list
   module X_arg = struct
     type 'a from = 'a F.arg
-    type 'a term = 'a X86.arg option * 'a from
+    type 'a term = 'a tagged_arg option * 'a from
     let fwd a = (None, a)
     let bwd (_, a) = a
   end
   module X_exp = struct
     type 'a from = 'a F.exp
-    type 'a term = (unit X86.instr list * 'a X86.arg) option * 'a from
-    let fwd a = (None, a)
-    let bwd (_, a) = a
+    type 'a term = unit X86.instr list * 'a tagged_exp option * 'a from
+    let fwd a = ([], None, a)
+    let bwd (_, _, a) = a
   end
   module X_stmt = struct
     type 'a from = 'a F.stmt
@@ -223,7 +227,53 @@ module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
     let bwd (_, a) = a
   end
 
-  module IDelta = struct end
+  module IDelta = struct
+    let int i = (Some (None, X86.int i), F.int i)
+    let var v = (Some (Some v, X86.var v), F.var v)
+
+    let arg (ann, arg) =
+      match ann with
+      | Some a -> ([], Some (Arg a), F.arg arg)
+      | None -> ([], None, F.arg arg)
+
+    let fresh =
+      let c = ref (-1) in
+      fun s ->
+        incr c;
+        s ^ string_of_int !c
+
+    let read () =
+      let lhs = fresh "lhs" in
+      ( X86.[ movq (reg rax) (var lhs); callq "read_int" ],
+        Some (Arg (Some lhs, X86.var lhs)),
+        F.read () )
+
+    let neg (stmts, tag, e) =
+      match tag with
+      | Some tag -> (stmts, Some (Exp ("neg", [ tag ])), F.neg e)
+      | None -> (stmts, None, F.neg e)
+    let ( + ) (stmts1, tag1, e1) (stmts2, tag2, e2) =
+      let stmts = stmts1 @ stmts2 in
+      match (tag1, tag2) with
+      | Some tag1, Some tag2 ->
+        (stmts, Some (Exp ("+", [ tag1; tag2 ])), F.(e1 + e2))
+      | _ -> (stmts, None, F.(e1 + e2))
+
+    let assign v (stmts, tag, e) =
+      match tag with
+      | Some (Exp ("neg", [ (Some v', _) ])) when v = v' ->
+        (X86.(negq (var v)) :: stmts, F.assign v e)
+      | Some (Exp ("neg", [ (_, arg) ])) ->
+        (X86.(negq (var v)) :: X86.(movq arg (var v)) :: stmts, F.assign v e)
+      | Some (Exp ("+", [ (Some v', _); (_, arg) ]))
+      | Some (Exp ("+", [ (_, arg); (Some v', _) ]))
+        when v = v' ->
+        (X86.(addq arg (var v)) :: stmts, F.assign v e)
+      | Some (Exp ("+", [ (_, arg1); (_, arg2) ])) ->
+        ( X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts,
+          F.assign v e )
+      | _ -> (stmts, F.assign v e)
+  end
 end
 
 module SelectInstructions (F : C0) (X86 : X86_0) = struct
@@ -234,7 +284,7 @@ end
 
 module Ex4 (F : R1) = struct
   open F
-  let res = program @@ (int 52 + neg (int 10))
+  let res = program (int 52 + neg (int 10))
 end
 
 module Ex5 (F : R1) = struct

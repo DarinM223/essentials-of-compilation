@@ -1,2 +1,4 @@
 (library
- (name essentials))
+ (name essentials)
+ (flags
+  (:standard -w -57)))
