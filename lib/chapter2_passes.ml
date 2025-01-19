@@ -191,6 +191,47 @@ module UncoverLocals (F : C0) = struct
   include M.IDelta
 end
 
+module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
+  module X_arg = struct
+    type 'a from = 'a F.arg
+    type 'a term = 'a X86.arg option * 'a from
+    let fwd a = (None, a)
+    let bwd (_, a) = a
+  end
+  module X_exp = struct
+    type 'a from = 'a F.exp
+    type 'a term = (unit X86.instr list * 'a X86.arg) option * 'a from
+    let fwd a = (None, a)
+    let bwd (_, a) = a
+  end
+  module X_stmt = struct
+    type 'a from = 'a F.stmt
+    type 'a term = unit X86.instr list * 'a from
+    let fwd a = ([], a)
+    let bwd (_, a) = a
+  end
+  module X_tail = struct
+    type 'a from = 'a F.tail
+    type 'a term = unit X86.instr list * 'a from
+    let fwd a = ([], a)
+    let bwd (_, a) = a
+  end
+  module X_program = struct
+    type 'a from = 'a F.program
+    type 'a term = unit X86.program option * 'a from
+    let fwd a = (None, a)
+    let bwd (_, a) = a
+  end
+
+  module IDelta = struct end
+end
+
+module SelectInstructions (F : C0) (X86 : X86_0) = struct
+  module M = SelectInstructionsPass (F) (X86)
+  include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = program @@ (int 52 + neg (int 10))
