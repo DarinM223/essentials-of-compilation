@@ -248,16 +248,15 @@ module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
         Some (Arg (Some lhs, X86.var lhs)),
         F.read () )
 
-    let neg (stmts, tag, e) =
+    let neg (tag, e) =
       match tag with
-      | Some tag -> (stmts, Some (Exp ("neg", [ tag ])), F.neg e)
-      | None -> (stmts, None, F.neg e)
-    let ( + ) (stmts1, tag1, e1) (stmts2, tag2, e2) =
-      let stmts = stmts1 @ stmts2 in
+      | Some tag -> ([], Some (Exp ("neg", [ tag ])), F.neg e)
+      | None -> ([], None, F.neg e)
+    let ( + ) (tag1, e1) (tag2, e2) =
       match (tag1, tag2) with
       | Some tag1, Some tag2 ->
-        (stmts, Some (Exp ("+", [ tag1; tag2 ])), F.(e1 + e2))
-      | _ -> (stmts, None, F.(e1 + e2))
+        ([], Some (Exp ("+", [ tag1; tag2 ])), F.(e1 + e2))
+      | _ -> ([], None, F.(e1 + e2))
 
     let assign v (stmts, tag, e) =
       match tag with
@@ -273,6 +272,26 @@ module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
         ( X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts,
           F.assign v e )
       | _ -> (stmts, F.assign v e)
+
+    let return (stmts, tag, e) =
+      let v = fresh "v" in
+      let stmts, _ = assign v (stmts, tag, e) in
+      (X86.retq :: X86.(movq (var v) (reg rax)) :: stmts, F.return e)
+    let ( @> ) (stmts1, s1) (stmts2, s2) = (stmts2 @ stmts1, F.( @> ) s1 s2)
+
+    let program info body =
+      let info' : X86.info = failwith "info" in
+      let program =
+        X86.program info'
+          (List.map (fun (l, (t, _)) -> (l, X86.block info' t)) body)
+      in
+      let body = List.map (fun (l, t) -> (l, X_tail.bwd t)) body in
+      (Some program, F.program info body)
+
+    type 'a obs = unit X86.program
+    let observe = function
+      | Some program, _ -> program
+      | _ -> failwith "Error: can't build X86 program"
   end
 end
 
@@ -323,3 +342,9 @@ let run () =
   Format.printf "Ex6: %s\n" M.res;
   let module M = Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty))) in
   Format.printf "Ex6 with locals: %s\n" M.res
+(* let module M =
+    Ex6
+      (ExplicateControl
+         (R1_Pretty)
+         (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))) in
+  Format.printf "Ex6 with locals: %s\n" M.res *)

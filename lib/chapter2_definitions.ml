@@ -229,17 +229,17 @@ module type X86_0 = sig
   type label = string
 
   type 'a instr
-  val addq : int arg -> int arg -> unit instr
-  val subq : int arg -> int arg -> unit instr
+  val addq : 'a arg -> 'a arg -> unit instr
+  val subq : 'a arg -> 'a arg -> unit instr
   val movq : 'a arg -> 'a arg -> unit instr
   val retq : unit instr
-  val negq : int arg -> unit instr
+  val negq : 'a arg -> unit instr
   val callq : label -> unit instr
   val pushq : 'a arg -> unit instr
   val popq : 'a arg -> unit instr
 
   type 'a block
-  type info
+  type info = unit
   val block : info -> unit instr list -> unit block
 
   type 'a program
@@ -269,7 +269,7 @@ struct
   type 'a block = 'a X_block.term
   type 'a program = 'a X_program.term
   type label = string
-  type info = F.info
+  type info = unit
 
   let rsp = X_reg.fwd F.rsp
   let rbp = X_reg.fwd F.rbp
@@ -312,6 +312,58 @@ struct
 
   type 'a obs = 'a F.obs
   let observe = F.observe
+end
+
+module X86_0_Pretty = struct
+  type 'a reg = string
+  type 'a arg = string
+  type 'a instr = string
+  type 'a block = string
+  type 'a program = string
+  type label = string
+  type info = unit
+  type 'a obs = string
+  let rsp = "rsp"
+  let rbp = "rbp"
+  let rax = "rax"
+  let rbx = "rbx"
+  let rcx = "rcx"
+  let rdx = "rdx"
+  let rsi = "rsi"
+  let rdi = "rdi"
+  let r8 = "r8"
+  let r9 = "r9"
+  let r10 = "r10"
+  let r11 = "r11"
+  let r12 = "r12"
+  let r13 = "r13"
+  let r14 = "r14"
+  let r15 = "r15"
+
+  let reg r = "(reg " ^ r ^ ")"
+  let deref r i = "(deref " ^ r ^ " " ^ string_of_int i ^ ")"
+  let int i = "(int " ^ string_of_int i ^ ")"
+  let var v = "(var " ^ v ^ ")"
+
+  let addq a b = "(addq " ^ a ^ " " ^ b ^ ")"
+  let subq a b = "(subq " ^ a ^ " " ^ b ^ ")"
+  let movq a b = "(movq " ^ a ^ " " ^ b ^ ")"
+  let retq = "(retq)"
+  let negq a = "(negq " ^ a ^ ")"
+  let callq l = "(callq " ^ l ^ ")"
+  let pushq a = "(pushq " ^ a ^ ")"
+  let popq a = "(pushq " ^ a ^ ")"
+
+  let string_of_info () = "()"
+  let block info instrs =
+    "(block " ^ string_of_info info ^ String.concat "\n" instrs ^ ")"
+  let program info body =
+    "(program " ^ string_of_info info
+    ^ String.concat "\n"
+        (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
+    ^ ")"
+
+  let observe s = s
 end
 
 module Ex1 (F : R1) = struct
