@@ -6,9 +6,11 @@ module type R0 = sig
   val neg : int exp -> int exp
   val ( + ) : int exp -> int exp -> int exp
 
-  (* This is similar to 'a obs and observe *)
   type 'a program
   val program : 'a exp -> 'a program
+
+  type 'a obs
+  val observe : 'a program -> 'a obs
 end
 
 module type TRANS = sig
@@ -19,18 +21,28 @@ module type TRANS = sig
   val bwd : 'a term -> 'a from
 end
 
-module R0_T (X : TRANS) (F : R0 with type 'a exp = 'a X.from) = struct
-  open X
+module R0_T
+    (X_exp : TRANS)
+    (X_program : TRANS)
+    (F :
+      R0
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  open X_exp
 
   type 'a exp = 'a term
-  type 'a program = 'a F.program
+  type 'a program = 'a X_program.term
 
   let int i = fwd @@ F.int i
   let read () = fwd @@ F.read ()
   let neg e = fwd @@ F.neg (bwd e)
   let ( + ) a b = fwd @@ F.( + ) (bwd a) (bwd b)
 
-  let program e = F.program (bwd e)
+  let program e = X_program.fwd @@ F.program (bwd e)
+
+  type 'a obs = 'a F.obs
+  let observe a = F.observe a
 end
 
 module R0_Interp = struct
@@ -45,6 +57,9 @@ module R0_Interp = struct
 
   type 'a program = 'a
   let program i = i
+
+  type 'a obs = 'a
+  let observe i = i
 end
 
 module R0_Pretty = struct
@@ -56,6 +71,9 @@ module R0_Pretty = struct
 
   type 'a program = string
   let program i = "(program " ^ i ^ ")"
+
+  type 'a obs = string
+  let observe s = s
 end
 
 module R0_Partial_Pass (F : R0) = struct
@@ -71,6 +89,13 @@ module R0_Partial_Pass (F : R0) = struct
 
     let fwd (a : 'a from) = (Unk, a)
     let bwd ((_, a) : 'a term) = a
+  end
+
+  module X_program = struct
+    type 'a from = 'a F.program
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
   end
 
   open X
@@ -123,29 +148,32 @@ module R0_Partial_Pass (F : R0) = struct
         in
         (ann, ann_to_exp ann)
       | Unk, Unk -> (Unk, F.(e1 + e2))
+
+    type 'a obs = 'a F.program
+    let observe a = a
   end
 end
 
-module R0_Partial (F : R0) = struct
+module R0_Partial (F : R0) : R0 with type 'a obs = 'a F.program = struct
   module M = R0_Partial_Pass (F)
-  include R0_T (M.X) (F)
+  include R0_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
 
 module Ex1 (F : R0) = struct
   open F
 
-  let res = program (read () + neg (int 5 + int 3))
+  let res = observe @@ program (read () + neg (int 5 + int 3))
 end
 
 module Ex2 (F : R0) = struct
   open F
-  let res = program (int 1 + (read () + int 1))
+  let res = observe @@ program (int 1 + (read () + int 1))
 end
 
 module Ex3 (F : R0) = struct
   open F
-  let res = program (int 4 + neg (read () + int 2) + neg (int 3))
+  let res = observe @@ program (int 4 + neg (read () + int 2) + neg (int 3))
 end
 
 let run () =

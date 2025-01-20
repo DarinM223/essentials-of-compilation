@@ -11,6 +11,12 @@ module RemoveComplexPass (F : R1) = struct
     let fwd a = (Complex, a)
     let bwd (_, a) = a
   end
+  module X_program = struct
+    type 'a from = 'a F.program
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
   open X
   module IDelta = struct
     let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
@@ -46,9 +52,9 @@ module RemoveComplexPass (F : R1) = struct
   end
 end
 
-module RemoveComplex (F : R1) = struct
+module RemoveComplex (F : R1) : R1 with type 'a obs = 'a F.obs = struct
   module M = RemoveComplexPass (F)
-  include R1_T (M.X) (F)
+  include R1_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
 
@@ -68,6 +74,12 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
 
     let fwd e = ({ bindings = []; result = Unk }, e)
     let bwd (_, e) = e
+  end
+  module X_program = struct
+    type 'a from = 'a F.program
+    type 'a term = unit C0.program option * 'a F.program
+    let fwd p = (None, p)
+    let bwd (_, p) = p
   end
   open X
   module IDelta = struct
@@ -122,15 +134,20 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
       in
       C0.program { locals = [] } [ ("start", start) ]
 
-    (* Overrides program to return the transformed program in the C0 language *)
-    type 'a program = 'a C0.program
-    let program (ann, _) = construct_c0 ann
+    let program (ann, e) = (Some (construct_c0 ann), F.program e)
+
+    type 'a obs = unit C0.obs
+    let observe (p, _) =
+      match p with
+      | Some p -> C0.observe p
+      | None -> failwith "Cannot decode program"
   end
 end
 
-module ExplicateControl (F : R1) (C0 : C0) = struct
+module ExplicateControl (F : R1) (C0 : C0) : R1 with type 'a obs = unit C0.obs =
+struct
   module M = ExplicateControlPass (F) (C0)
-  include R1_T (M.X) (F)
+  include R1_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
 
@@ -303,13 +320,13 @@ end
 
 module Ex4 (F : R1) = struct
   open F
-  let res = program (int 52 + neg (int 10))
+  let res = observe @@ program (int 52 + neg (int 10))
 end
 
 module Ex5 (F : R1) = struct
   open F
   let res =
-    program
+    observe @@ program
     @@
     let* a = int 42 in
     let* b = var a in
@@ -320,7 +337,7 @@ module Ex6 (F : R1) = struct
   open F
 
   let res =
-    program
+    observe @@ program
     @@
     let* y =
       let* x = int 20 in

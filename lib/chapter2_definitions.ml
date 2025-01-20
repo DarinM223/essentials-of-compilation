@@ -7,18 +7,25 @@ module type R1 = sig
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
 
-module R1_T (X : Chapter1.TRANS) (F : R1 with type 'a exp = 'a X.from) = struct
-  include Chapter1.R0_T (X) (F)
-  open X
+module R1_T
+    (X_exp : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      R1
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include Chapter1.R0_T (X_exp) (X_program) (F)
+  open X_exp
   type 'a var = 'a F.var
   let string_of_var = F.string_of_var
   let var v = fwd @@ F.var v
   let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 end
 
-module R1_Partial (F : R1) = struct
+module R1_Partial (F : R1) : R1 with type 'a obs = 'a F.program = struct
   module M = Chapter1.R0_Partial_Pass (F)
-  include R1_T (M.X) (F)
+  include R1_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
 
@@ -99,6 +106,9 @@ module R1_Interp = struct
     let result = f v in
     remove_env v;
     result
+
+  type 'a obs = 'a
+  let observe a = a
 end
 
 module type C0 = sig
@@ -370,7 +380,7 @@ module Ex1 (F : R1) = struct
   open F
 
   let res =
-    program
+    observe @@ program
     @@
     let* x = int 12 + int 20 in
     int 10 + var x
@@ -380,7 +390,7 @@ module Ex2 (F : R1) = struct
   open F
 
   let res =
-    program
+    observe @@ program
     @@
     let* x = int 32 in
     (let* x = int 10 in
@@ -388,7 +398,7 @@ module Ex2 (F : R1) = struct
     + var x
 
   let check =
-    program
+    observe @@ program
     @@
     let* x1 = int 32 in
     (let* x2 = int 10 in
@@ -399,7 +409,7 @@ end
 module Ex3 (F : R1) = struct
   open F
   let res =
-    program
+    observe @@ program
     @@
     let* x = read () in
     let* y = read () in
@@ -410,14 +420,15 @@ module C0_Ex1 (F : C0) = struct
   open F
 
   let res =
-    program { locals = [] }
-      [
-        ( "start",
-          assign "x_1" (arg (int 20))
-          @> assign "x_2" (arg (int 22))
-          @> assign "y" (var "x_1" + var "x_2")
-          @> return (arg (var "y")) );
-      ]
+    observe
+    @@ program { locals = [] }
+         [
+           ( "start",
+             assign "x_1" (arg (int 20))
+             @> assign "x_2" (arg (int 22))
+             @> assign "y" (var "x_1" + var "x_2")
+             @> return (arg (var "y")) );
+         ]
 end
 
 let run () =
