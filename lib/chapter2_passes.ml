@@ -208,115 +208,66 @@ module UncoverLocals (F : C0) : C0 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
+module SelectInstructions (F : C0) (X86 : X86_0) = struct
   type 'a tagged_arg = string option * 'a X86.arg
   type 'a tagged_exp =
     | Arg of 'a tagged_arg
     | Exp of string * 'a tagged_arg list
-  module X_arg = struct
-    type 'a from = 'a F.arg
-    type 'a term = 'a tagged_arg option * 'a from
-    let fwd a = (None, a)
-    let bwd (_, a) = a
-  end
-  module X_exp = struct
-    type 'a from = 'a F.exp
-    type 'a term = unit X86.instr list * 'a tagged_exp option * 'a from
-    let fwd a = ([], None, a)
-    let bwd (_, _, a) = a
-  end
-  module X_stmt = struct
-    type 'a from = 'a F.stmt
-    type 'a term = unit X86.instr list * 'a from
-    let fwd a = ([], a)
-    let bwd (_, a) = a
-  end
-  module X_tail = struct
-    type 'a from = 'a F.tail
-    type 'a term = unit X86.instr list * 'a from
-    let fwd a = ([], a)
-    let bwd (_, a) = a
-  end
-  module X_program = struct
-    type 'a from = 'a F.program
-    type 'a term = unit X86.program option * 'a from
-    let fwd a = (None, a)
-    let bwd (_, a) = a
-  end
+  type 'a arg = 'a tagged_arg
+  type 'a exp = unit X86.instr list * 'a tagged_exp
+  type 'a stmt = unit X86.instr list
+  type 'a tail = unit X86.instr list
+  type 'a program = unit X86.program
+  type var = string
+  type info = F.info
 
-  module IDelta = struct
-    let int i = (Some (None, X86.int i), F.int i)
-    let var v = (Some (Some v, X86.var v), F.var v)
+  let int i = (None, X86.int i)
+  let var v = (Some v, X86.var v)
 
-    let arg (ann, arg) =
-      match ann with
-      | Some a -> ([], Some (Arg a), F.arg arg)
-      | None -> ([], None, F.arg arg)
+  let arg a = ([], Arg a)
 
-    let fresh =
-      let c = ref (-1) in
-      fun s ->
-        incr c;
-        s ^ string_of_int !c
+  let fresh =
+    let c = ref (-1) in
+    fun s ->
+      incr c;
+      s ^ string_of_int !c
 
-    let read () =
-      let lhs = fresh "lhs" in
-      ( X86.[ movq (reg rax) (var lhs); callq "read_int" ],
-        Some (Arg (Some lhs, X86.var lhs)),
-        F.read () )
+  let read () =
+    let lhs = fresh "lhs" in
+    ( X86.[ movq (reg rax) (var lhs); callq "read_int" ],
+      Arg (Some lhs, X86.var lhs) )
 
-    let neg (tag, e) =
-      match tag with
-      | Some tag -> ([], Some (Exp ("neg", [ tag ])), F.neg e)
-      | None -> ([], None, F.neg e)
-    let ( + ) (tag1, e1) (tag2, e2) =
-      match (tag1, tag2) with
-      | Some tag1, Some tag2 ->
-        ([], Some (Exp ("+", [ tag1; tag2 ])), F.(e1 + e2))
-      | _ -> ([], None, F.(e1 + e2))
+  let neg a = ([], Exp ("neg", [ a ]))
+  let ( + ) a b = ([], Exp ("+", [ a; b ]))
 
-    let assign v (stmts, tag, e) =
-      match tag with
-      | Some (Exp ("neg", [ (Some v', _) ])) when v = v' ->
-        (X86.(negq (var v)) :: stmts, F.assign v e)
-      | Some (Exp ("neg", [ (_, arg) ])) ->
-        (X86.(negq (var v)) :: X86.(movq arg (var v)) :: stmts, F.assign v e)
-      | Some (Exp ("+", [ (Some v', _); (_, arg) ]))
-      | Some (Exp ("+", [ (_, arg); (Some v', _) ]))
-        when v = v' ->
-        (X86.(addq arg (var v)) :: stmts, F.assign v e)
-      | Some (Exp ("+", [ (_, arg1); (_, arg2) ])) ->
-        ( X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts,
-          F.assign v e )
-      | _ -> (stmts, F.assign v e)
+  let assign v (stmts, tag) =
+    match tag with
+    | Exp ("neg", [ (Some v', _) ]) when v = v' -> X86.(negq (var v)) :: stmts
+    | Exp ("neg", [ (_, arg) ]) ->
+      X86.(negq (var v)) :: X86.(movq arg (var v)) :: stmts
+    | Exp ("+", [ (Some v', _); (_, arg) ])
+    | Exp ("+", [ (_, arg); (Some v', _) ])
+      when v = v' ->
+      X86.(addq arg (var v)) :: stmts
+    | Exp ("+", [ (_, arg1); (_, arg2) ]) ->
+      X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts
+    | _ -> stmts
 
-    let return (stmts, tag, e) =
-      let v = fresh "v" in
-      let stmts, _ = assign v (stmts, tag, e) in
-      (X86.retq :: X86.(movq (var v) (reg rax)) :: stmts, F.return e)
-    let ( @> ) (stmts1, s1) (stmts2, s2) = (stmts2 @ stmts1, F.( @> ) s1 s2)
+  let return (stmts, tag) =
+    let v = fresh "v" in
+    let stmts = assign v (stmts, tag) in
+    X86.retq :: X86.(movq (var v) (reg rax)) :: stmts
+  let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
 
-    let program info body =
-      let info' : X86.info = X86.info () in
-      let program =
-        X86.program info'
-          (List.map (fun (l, (t, _)) -> (l, X86.block info' (List.rev t))) body)
-      in
-      let body = List.map (fun (l, t) -> (l, X_tail.bwd t)) body in
-      (Some program, F.program info body)
+  let info = F.info
 
-    type 'a obs = unit X86.obs
-    let observe = function
-      | Some program, _ -> X86.observe program
-      | _ -> failwith "Error: can't build X86 program"
-  end
-end
+  let program _ body =
+    let info' : X86.info = X86.info () in
+    X86.program info'
+      (List.map (fun (l, t) -> (l, X86.block info' (List.rev t))) body)
 
-module SelectInstructions (F : C0) (X86 : X86_0) :
-  C0 with type 'a obs = unit X86.obs = struct
-  module M = SelectInstructionsPass (F) (X86)
-  include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
-  include M.IDelta
+  type 'a obs = unit X86.obs
+  let observe = X86.observe
 end
 
 module Ex4 (F : R1) = struct
