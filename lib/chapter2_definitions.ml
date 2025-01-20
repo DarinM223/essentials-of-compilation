@@ -134,7 +134,8 @@ module type C0 = sig
   val ( @> ) : unit stmt -> unit tail -> unit tail
 
   type 'a program
-  type info = { locals : string list }
+  type info
+  val info : string list -> info
   val program : info -> (string * unit tail) list -> unit program
 
   type 'a obs
@@ -161,7 +162,7 @@ struct
   type 'a stmt = 'a X_stmt.term
   type 'a tail = 'a X_tail.term
   type 'a program = 'a X_program.term
-  type info = { locals : string list }
+  type info = F.info
 
   let int i = X_arg.fwd @@ F.int i
   let var v = X_arg.fwd @@ F.var v
@@ -172,6 +173,7 @@ struct
   let assign v e = X_stmt.fwd @@ F.assign v @@ X_exp.bwd e
   let return e = X_tail.fwd @@ F.return @@ X_exp.bwd e
   let ( @> ) s t = X_tail.fwd @@ F.( @> ) (X_stmt.bwd s) (X_tail.bwd t)
+  let info = F.info
   let program info body =
     X_program.fwd @@ F.program info
     @@ List.map (fun (s, t) -> (s, X_tail.bwd t)) body
@@ -200,12 +202,12 @@ module C0_Pretty = struct
   let ( @> ) stmt rest = "(seq " ^ stmt ^ " " ^ rest ^ ")"
 
   type 'a program = string
-  type info = { locals : string list }
+  type info = string
+  let info i = "(" ^ String.concat " " i ^ ")"
   let program info body =
-    let locals = String.concat " " info.locals in
     let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
     let body = String.concat "\n" (List.map pair body) in
-    "(program ((locals . (" ^ locals ^ "))) (" ^ body ^ ")"
+    "(program ((locals . " ^ info ^ ")) (" ^ body ^ ")"
 
   type 'a obs = string
   let observe p = p
@@ -249,7 +251,8 @@ module type X86_0 = sig
   val popq : 'a arg -> unit instr
 
   type 'a block
-  type info = unit
+  type info
+  val info : unit -> info
   val block : info -> unit instr list -> unit block
 
   type 'a program
@@ -279,7 +282,7 @@ struct
   type 'a block = 'a X_block.term
   type 'a program = 'a X_program.term
   type label = string
-  type info = unit
+  type info = F.info
 
   let rsp = X_reg.fwd F.rsp
   let rbp = X_reg.fwd F.rbp
@@ -331,7 +334,7 @@ module X86_0_Pretty = struct
   type 'a block = string
   type 'a program = string
   type label = string
-  type info = unit
+  type info = string
   type 'a obs = string
   let rsp = "rsp"
   let rbp = "rbp"
@@ -364,11 +367,11 @@ module X86_0_Pretty = struct
   let pushq a = "(pushq " ^ a ^ ")"
   let popq a = "(pushq " ^ a ^ ")"
 
-  let string_of_info () = "()"
+  let info () = "()"
   let block info instrs =
-    "(block " ^ string_of_info info ^ String.concat "\n" instrs ^ ")"
+    "(block " ^ info ^ "\n" ^ String.concat "\n" instrs ^ ")"
   let program info body =
-    "(program " ^ string_of_info info
+    "(program " ^ info ^ " "
     ^ String.concat "\n"
         (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
     ^ ")"
@@ -421,7 +424,7 @@ module C0_Ex1 (F : C0) = struct
 
   let res =
     observe
-    @@ program { locals = [] }
+    @@ program (info [])
          [
            ( "start",
              assign "x_1" (arg (int 20))

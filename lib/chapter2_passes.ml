@@ -132,7 +132,7 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
         | [] -> to_stmt ann.result
         | _ -> List.fold_right C0.( @> ) ann.bindings (to_stmt ann.result)
       in
-      C0.program { locals = [] } [ ("start", start) ]
+      C0.(program (info []) [ ("start", start) ])
 
     let program (ann, e) = (Some (construct_c0 ann), F.program e)
 
@@ -198,11 +198,11 @@ module UncoverLocalsPass (F : C0) = struct
         |> S.to_list
       in
       let body = List.map (fun (s, t) -> (s, X_tail.bwd t)) body in
-      F.program { locals } body
+      F.(program (info locals) body)
   end
 end
 
-module UncoverLocals (F : C0) = struct
+module UncoverLocals (F : C0) : C0 with type 'a obs = 'a F.obs = struct
   module M = UncoverLocalsPass (F)
   include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
   include M.IDelta
@@ -297,22 +297,23 @@ module SelectInstructionsPass (F : C0) (X86 : X86_0) = struct
     let ( @> ) (stmts1, s1) (stmts2, s2) = (stmts2 @ stmts1, F.( @> ) s1 s2)
 
     let program info body =
-      let info' : X86.info = failwith "info" in
+      let info' : X86.info = X86.info () in
       let program =
         X86.program info'
-          (List.map (fun (l, (t, _)) -> (l, X86.block info' t)) body)
+          (List.map (fun (l, (t, _)) -> (l, X86.block info' (List.rev t))) body)
       in
       let body = List.map (fun (l, t) -> (l, X_tail.bwd t)) body in
       (Some program, F.program info body)
 
-    type 'a obs = unit X86.program
+    type 'a obs = unit X86.obs
     let observe = function
-      | Some program, _ -> program
+      | Some program, _ -> X86.observe program
       | _ -> failwith "Error: can't build X86 program"
   end
 end
 
-module SelectInstructions (F : C0) (X86 : X86_0) = struct
+module SelectInstructions (F : C0) (X86 : X86_0) :
+  C0 with type 'a obs = unit X86.obs = struct
   module M = SelectInstructionsPass (F) (X86)
   include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
   include M.IDelta
@@ -358,10 +359,10 @@ let run () =
   let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty)) in
   Format.printf "Ex6: %s\n" M.res;
   let module M = Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty))) in
-  Format.printf "Ex6 with locals: %s\n" M.res
-(* let module M =
+  Format.printf "Ex6 with locals: %s\n" M.res;
+  let module M =
     Ex6
       (ExplicateControl
          (R1_Pretty)
          (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))) in
-  Format.printf "Ex6 with locals: %s\n" M.res *)
+  Format.printf "Ex6 with locals: %s\n" M.res
