@@ -221,22 +221,19 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   type var = string
   type info = F.info
 
-  let int i = (None, X86.int i)
-  let var v = (Some v, X86.var v)
-
-  let arg a = ([], Arg a)
-
   let fresh =
     let c = ref (-1) in
     fun s ->
       incr c;
       s ^ string_of_int !c
 
+  let int i = (None, X86.int i)
+  let var v = (Some v, X86.var v)
+  let arg a = ([], Arg a)
   let read () =
     let lhs = fresh "lhs" in
     ( X86.[ movq (reg rax) (var lhs); callq "read_int" ],
       Arg (Some lhs, X86.var lhs) )
-
   let neg a = ([], Exp ("neg", [ a ]))
   let ( + ) a b = ([], Exp ("+", [ a; b ]))
 
@@ -251,14 +248,18 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
       X86.(addq arg (var v)) :: stmts
     | Exp ("+", [ (_, arg1); (_, arg2) ]) ->
       X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts
+    | Arg (_, a) -> X86.(movq a (var v)) :: stmts
     | _ -> stmts
 
   let return (stmts, tag) =
-    let v = fresh "v" in
-    let stmts = assign v (stmts, tag) in
-    X86.retq :: X86.(movq (var v) (reg rax)) :: stmts
-  let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
+    match tag with
+    | Arg (_, a) -> X86.retq :: X86.(movq a (reg rax)) :: stmts
+    | Exp _ ->
+      let v = fresh "v" in
+      let stmts = assign v (stmts, tag) in
+      X86.retq :: X86.(movq (var v) (reg rax)) :: stmts
 
+  let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
   let info = F.info
 
   let program _ body =

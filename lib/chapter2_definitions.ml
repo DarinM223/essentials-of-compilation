@@ -243,7 +243,7 @@ module type X86_0 = sig
   type 'a instr
   val addq : 'a arg -> 'a arg -> unit instr
   val subq : 'a arg -> 'a arg -> unit instr
-  val movq : 'a arg -> 'a arg -> unit instr
+  val movq : 'a arg -> 'b arg -> unit instr
   val retq : unit instr
   val negq : 'a arg -> unit instr
   val callq : label -> unit instr
