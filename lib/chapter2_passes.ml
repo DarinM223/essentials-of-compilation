@@ -271,6 +271,89 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let observe = X86.observe
 end
 
+module AssignHomesPass (X86 : X86_0) = struct
+  module X_reg = struct
+    type 'a from = 'a X86.reg
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+  module X_arg = struct
+    type 'a from = 'a X86.arg
+    type 'a term =
+      | Var of string * (unit -> int) ref
+      | Unk of 'a from
+    let fwd a = Unk a
+    let bwd = function
+      | Var (_, f) -> X86.(deref rbp (!f ()))
+      | Unk a -> a
+  end
+  module X_instr = struct
+    type 'a from = 'a X86.instr
+    type 'a term = (string * (unit -> int) ref) list * (unit -> 'a from)
+    let fwd a = ([], fun () -> a)
+    let bwd (_, f) = f ()
+  end
+  module X_block = struct
+    type 'a from = 'a X86.block
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+  module X_program = struct
+    type 'a from = 'a X86.program
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+
+  module IDelta = struct
+    let var v =
+      X_arg.Var (v, ref (fun () -> failwith "Could not convert to stack slot"))
+    let collect_args l =
+      let go acc = function
+        | X_arg.Var (r, f) -> (r, f) :: acc
+        | X_arg.Unk _ -> acc
+      in
+      List.fold_left go [] l
+    let addq a b =
+      (collect_args [ a; b ], fun () -> X86.addq (X_arg.bwd a) (X_arg.bwd b))
+    let subq a b =
+      (collect_args [ a; b ], fun () -> X86.subq (X_arg.bwd a) (X_arg.bwd b))
+    let movq a b =
+      ( collect_args [ a ] @ collect_args [ b ],
+        fun () -> X86.movq (X_arg.bwd a) (X_arg.bwd b) )
+    let negq a = (collect_args [ a ], fun () -> X86.negq (X_arg.bwd a))
+    let pushq a = (collect_args [ a ], fun () -> X86.pushq (X_arg.bwd a))
+    let popq a = (collect_args [ a ], fun () -> X86.popq (X_arg.bwd a))
+
+    let block info instrs =
+      let stack_size = ref 0 in
+      let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
+      let get_stack_slot (v : string) : int =
+        match Hashtbl.find_opt var_table v with
+        | Some slot -> slot
+        | None ->
+          stack_size := !stack_size + 8;
+          let slot = - !stack_size in
+          Hashtbl.add var_table v slot;
+          slot
+      in
+      let rewrite_instr (vars, _) =
+        let rewrite_var (v, rewrite) = rewrite := fun () -> get_stack_slot v in
+        List.iter rewrite_var vars
+      in
+      List.iter rewrite_instr instrs;
+      X86.block info @@ List.map (fun (_, f) -> f ()) instrs
+  end
+end
+
+module AssignHomes (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
+  module M = AssignHomesPass (F)
+  include X86_0_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = observe @@ program (int 52 + neg (int 10))
@@ -317,4 +400,11 @@ let run () =
       (ExplicateControl
          (R1_Pretty)
          (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))) in
-  Format.printf "Ex6 with locals: %s\n" M.res
+  Format.printf "Ex6 with locals: %s\n" M.res;
+  let module M =
+    Ex6
+      (ExplicateControl
+         (R1_Pretty)
+         (SelectInstructions
+            (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))) in
+  Format.printf "Ex6 with assigned homes: %s\n" M.res

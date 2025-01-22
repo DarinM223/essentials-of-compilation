@@ -234,7 +234,7 @@ module type X86_0 = sig
 
   type 'a arg
   val reg : 'a reg -> 'a arg
-  val deref : 'a reg -> int -> 'a arg
+  val deref : 'b reg -> int -> 'a arg
   val int : int -> int arg
   val var : string -> 'a arg
 
@@ -315,6 +315,8 @@ struct
   let callq l = X_instr.fwd @@ F.callq l
   let pushq a = X_instr.fwd @@ F.pushq @@ X_arg.bwd a
   let popq a = X_instr.fwd @@ F.popq @@ X_arg.bwd a
+
+  let info = F.info
 
   let block info instrs =
     X_block.fwd @@ F.block info @@ List.map X_instr.bwd instrs
