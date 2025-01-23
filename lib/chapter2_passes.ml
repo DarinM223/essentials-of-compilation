@@ -271,87 +271,58 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let observe = X86.observe
 end
 
-module AssignHomesPass (X86 : X86_0) = struct
+module AssignHomes (X86 : X86_0) = struct
+  type 'a reg = 'a X86.reg
+  type 'a arg = (string -> int) -> 'a X86.arg
+  type 'a instr = (string -> int) -> 'a X86.instr
+  type 'a block = (string -> int) -> 'a X86.block
+  type 'a program = 'a X86.program
+  type label = X86.label
+  type info = X86.info
+
   module X_reg = struct
-    type 'a from = 'a X86.reg
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
-  module X_arg = struct
-    type 'a from = 'a X86.arg
-    type 'a term =
-      | Var of string * (unit -> int) ref
-      | Unk of 'a from
-    let fwd a = Unk a
-    let bwd = function
-      | Var (_, f) -> X86.(deref rbp (!f ()))
-      | Unk a -> a
-  end
-  module X_instr = struct
-    type 'a from = 'a X86.instr
-    type 'a term = (string * (unit -> int) ref) list * (unit -> 'a from)
-    let fwd a = ([], fun () -> a)
-    let bwd (_, f) = f ()
-  end
-  module X_block = struct
-    type 'a from = 'a X86.block
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
-  module X_program = struct
-    type 'a from = 'a X86.program
+    type 'a from = 'a reg
     type 'a term = 'a from
     let fwd a = a
     let bwd a = a
   end
 
-  module IDelta = struct
-    let var v =
-      X_arg.Var (v, ref (fun () -> failwith "Could not convert to stack slot"))
-    let collect_args l =
-      let go acc = function
-        | X_arg.Var (r, f) -> (r, f) :: acc
-        | X_arg.Unk _ -> acc
-      in
-      List.fold_left go [] l
-    let addq a b =
-      (collect_args [ a; b ], fun () -> X86.addq (X_arg.bwd a) (X_arg.bwd b))
-    let subq a b =
-      (collect_args [ a; b ], fun () -> X86.subq (X_arg.bwd a) (X_arg.bwd b))
-    let movq a b =
-      ( collect_args [ a ] @ collect_args [ b ],
-        fun () -> X86.movq (X_arg.bwd a) (X_arg.bwd b) )
-    let negq a = (collect_args [ a ], fun () -> X86.negq (X_arg.bwd a))
-    let pushq a = (collect_args [ a ], fun () -> X86.pushq (X_arg.bwd a))
-    let popq a = (collect_args [ a ], fun () -> X86.popq (X_arg.bwd a))
+  include X86_0_Reg_T (X_reg) (X86)
 
-    let block info instrs =
-      let stack_size = ref 0 in
-      let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
-      let get_stack_slot (v : string) : int =
-        match Hashtbl.find_opt var_table v with
-        | Some slot -> slot
-        | None ->
-          stack_size := !stack_size + 8;
-          let slot = - !stack_size in
-          Hashtbl.add var_table v slot;
-          slot
-      in
-      let rewrite_instr (vars, _) =
-        let rewrite_var (v, rewrite) = rewrite := fun () -> get_stack_slot v in
-        List.iter rewrite_var vars
-      in
-      List.iter rewrite_instr instrs;
-      X86.block info @@ List.map (fun (_, f) -> f ()) instrs
-  end
-end
+  let reg v _ = X86.reg v
+  let var v f = X86.(deref rbp (f v))
+  let int v _ = X86.int v
+  let deref r i _ = X86.deref r i
 
-module AssignHomes (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
-  module M = AssignHomesPass (F)
-  include X86_0_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
-  include M.IDelta
+  let addq a b f = X86.addq (a f) (b f)
+  let subq a b f = X86.subq (a f) (b f)
+  let movq a b f = X86.movq (a f) (b f)
+  let negq a f = X86.negq (a f)
+  let pushq a f = X86.pushq (a f)
+  let popq a f = X86.popq (a f)
+  let retq _ = X86.retq
+  let callq l _ = X86.callq l
+
+  let block info instrs f = X86.block info @@ List.map (fun i -> i f) instrs
+
+  let program info blocks =
+    let stack_size = ref 0 in
+    let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
+    let get_stack_slot (v : string) : int =
+      match Hashtbl.find_opt var_table v with
+      | Some slot -> slot
+      | None ->
+        stack_size := !stack_size + 8;
+        let slot = - !stack_size in
+        Hashtbl.add var_table v slot;
+        slot
+    in
+    X86.program info @@ List.map (fun (l, b) -> (l, b get_stack_slot)) blocks
+
+  let info = X86.info
+
+  type 'a obs = 'a X86.obs
+  let observe a = a
 end
 
 module Ex4 (F : R1) = struct

@@ -262,6 +262,28 @@ module type X86_0 = sig
   val observe : 'a program -> 'a obs
 end
 
+module X86_0_Reg_T
+    (X_reg : Chapter1.TRANS)
+    (F : X86_0 with type 'a reg = 'a X_reg.from) =
+struct
+  let rsp = X_reg.fwd F.rsp
+  let rbp = X_reg.fwd F.rbp
+  let rax = X_reg.fwd F.rax
+  let rbx = X_reg.fwd F.rbx
+  let rcx = X_reg.fwd F.rcx
+  let rdx = X_reg.fwd F.rdx
+  let rsi = X_reg.fwd F.rsi
+  let rdi = X_reg.fwd F.rdi
+  let r8 = X_reg.fwd F.r8
+  let r9 = X_reg.fwd F.r9
+  let r10 = X_reg.fwd F.r10
+  let r11 = X_reg.fwd F.r11
+  let r12 = X_reg.fwd F.r12
+  let r13 = X_reg.fwd F.r13
+  let r14 = X_reg.fwd F.r14
+  let r15 = X_reg.fwd F.r15
+end
+
 module X86_0_T
     (X_reg : Chapter1.TRANS)
     (X_arg : Chapter1.TRANS)
@@ -284,22 +306,7 @@ struct
   type label = string
   type info = F.info
 
-  let rsp = X_reg.fwd F.rsp
-  let rbp = X_reg.fwd F.rbp
-  let rax = X_reg.fwd F.rax
-  let rbx = X_reg.fwd F.rbx
-  let rcx = X_reg.fwd F.rcx
-  let rdx = X_reg.fwd F.rdx
-  let rsi = X_reg.fwd F.rsi
-  let rdi = X_reg.fwd F.rdi
-  let r8 = X_reg.fwd F.r8
-  let r9 = X_reg.fwd F.r9
-  let r10 = X_reg.fwd F.r10
-  let r11 = X_reg.fwd F.r11
-  let r12 = X_reg.fwd F.r12
-  let r13 = X_reg.fwd F.r13
-  let r14 = X_reg.fwd F.r14
-  let r15 = X_reg.fwd F.r15
+  include X86_0_Reg_T (X_reg) (F)
 
   let reg r = X_arg.fwd @@ F.reg @@ X_reg.bwd r
   let deref r i = X_arg.fwd @@ F.deref (X_reg.bwd r) i
