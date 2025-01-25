@@ -325,6 +325,66 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   let observe = X86.observe
 end
 
+module PatchInstructionsPass (X86 : X86_0) = struct
+  module X_reg = struct
+    type 'a from = 'a X86.reg
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+
+  module X_arg = struct
+    type 'a from = 'a X86.arg
+    type 'a term = bool * 'a from (* true if arg is a memory reference *)
+    let fwd a = (false, a)
+    let bwd (_, a) = a
+  end
+
+  module X_instr = struct
+    type 'a from = 'a X86.instr
+    type 'a term = 'a from list
+    let fwd a = [ a ]
+    let bwd = List.hd
+  end
+
+  module X_block = struct
+    type 'a from = 'a X86.block
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+
+  module X_program = struct
+    type 'a from = 'a X86.program
+    type 'a term = 'a from
+    let fwd a = a
+    let bwd a = a
+  end
+
+  module IDelta = struct
+    let deref r i = (true, X86.deref r i)
+    let addq (ismem1, a) (ismem2, b) =
+      match (ismem1, ismem2) with
+      | true, true -> [ X86.(movq a (reg rax)); X86.(addq (reg rax) b) ]
+      | _ -> X_instr.fwd @@ X86.addq a b
+    let subq (ismem1, a) (ismem2, b) =
+      match (ismem1, ismem2) with
+      | true, true -> [ X86.(movq a (reg rax)); X86.(subq (reg rax) b) ]
+      | _ -> X_instr.fwd @@ X86.subq a b
+    let movq (ismem1, a) (ismem2, b) =
+      match (ismem1, ismem2) with
+      | true, true -> [ X86.(movq a (reg rax)); X86.(movq (reg rax) b) ]
+      | _ -> X_instr.fwd @@ X86.movq a b
+    let block info instrs = X86.block info @@ List.concat instrs
+  end
+end
+
+module PatchInstructions (F : X86_0) = struct
+  module M = PatchInstructionsPass (F)
+  include X86_0_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = observe @@ program (int 52 + neg (int 10))
@@ -378,4 +438,13 @@ let run () =
          (R1_Pretty)
          (SelectInstructions
             (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))) in
-  Format.printf "Ex6 with assigned homes: %s\n" M.res
+  Format.printf "Ex6 with assigned homes: %s\n" M.res;
+  let module M =
+    Ex6
+      (ExplicateControl
+         (R1_Pretty)
+         (SelectInstructions
+            (UncoverLocals
+               (C0_Pretty))
+               (AssignHomes (PatchInstructions (X86_0_Pretty))))) in
+  Format.printf "Ex6 with patched instructions: %s\n" M.res

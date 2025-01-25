@@ -241,8 +241,8 @@ module type X86_0 = sig
   type label = string
 
   type 'a instr
-  val addq : 'a arg -> 'a arg -> unit instr
-  val subq : 'a arg -> 'a arg -> unit instr
+  val addq : 'a arg -> 'b arg -> unit instr
+  val subq : 'a arg -> 'b arg -> unit instr
   val movq : 'a arg -> 'b arg -> unit instr
   val retq : unit instr
   val negq : 'a arg -> unit instr
