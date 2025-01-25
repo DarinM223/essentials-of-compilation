@@ -271,7 +271,7 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let observe = X86.observe
 end
 
-module AssignHomes (X86 : X86_0) = struct
+module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   type 'a reg = 'a X86.reg
   type 'a arg = (string -> int) -> 'a X86.arg
   type 'a instr = (string -> int) -> 'a X86.instr
@@ -322,7 +322,7 @@ module AssignHomes (X86 : X86_0) = struct
   let info = X86.info
 
   type 'a obs = 'a X86.obs
-  let observe a = a
+  let observe = X86.observe
 end
 
 module Ex4 (F : R1) = struct
