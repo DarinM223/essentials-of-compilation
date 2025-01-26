@@ -31,7 +31,7 @@ module RemoveComplexPass (F : R1) = struct
         (Complex, F.neg (F.var tmp))
     type _ eff += Normalize : ann * 'a from -> 'a from eff
     let ( + ) (ann1, e1) (ann2, e2) =
-      let go () =
+      try
         let e1 =
           match ann1 with
           | Simple -> e1
@@ -43,10 +43,7 @@ module RemoveComplexPass (F : R1) = struct
           | Complex -> Effect.perform (Normalize (ann2, e2))
         in
         (Complex, F.(e1 + e2))
-      in
-      match go () with
-      | result -> result
-      | effect Normalize (ann, e), k ->
+      with effect Normalize (ann, e), k ->
         let* tmp = (ann, e) in
         Effect.Deep.continue k (F.var tmp)
   end
