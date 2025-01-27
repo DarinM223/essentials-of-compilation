@@ -1,2 +1,4 @@
 _build/
 .vscode/
+example/example
+example/example.o

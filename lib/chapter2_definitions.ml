@@ -252,7 +252,7 @@ module type X86_0 = sig
 
   type 'a block
   type info
-  val info : unit -> info
+  val info : ?stack_size:int -> unit -> info
   val block : info -> unit instr list -> unit block
 
   type 'a program
@@ -376,7 +376,11 @@ module X86_0_Pretty = struct
   let pushq a = "(pushq " ^ a ^ ")"
   let popq a = "(pushq " ^ a ^ ")"
 
-  let info () = "()"
+  let info ?stack_size () =
+    match stack_size with
+    | Some stack_size -> "((stack_size . " ^ string_of_int stack_size ^ "))"
+    | None -> "()"
+
   let block info instrs =
     "(block " ^ info ^ "\n" ^ String.concat "\n" instrs ^ ")"
   let program info body =

@@ -254,6 +254,7 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
     | Exp _ ->
       let v = fresh "v" in
       let stmts = assign v (stmts, tag) in
+      (* TODO: jump to exit block and mark exit block so that stack can unwind before retq *)
       X86.retq :: X86.(movq (var v) (reg rax)) :: stmts
 
   let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
@@ -302,7 +303,7 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
 
   let block info instrs f = X86.block info @@ List.map (fun i -> i f) instrs
 
-  let program info blocks =
+  let program _ blocks =
     let stack_size = ref 0 in
     let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
     let get_stack_slot (v : string) : int =
@@ -314,7 +315,9 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
         Hashtbl.add var_table v slot;
         slot
     in
-    X86.program info @@ List.map (fun (l, b) -> (l, b get_stack_slot)) blocks
+    let blocks = List.map (fun (l, b) -> (l, b get_stack_slot)) blocks in
+    let info = X86.info ~stack_size:!stack_size () in
+    X86.program info blocks
 
   let info = X86.info
 
@@ -382,6 +385,83 @@ module PatchInstructions (F : X86_0) = struct
   include M.IDelta
 end
 
+module ListUtils = struct
+  let[@tail_mod_cons] rec add_before_end a = function
+    | [ last ] -> [ a; last ]
+    | x :: xs -> x :: add_before_end a xs
+    | [] -> [ a ]
+end
+
+module X86_0_Printer = struct
+  type 'a reg = string
+  type 'a arg = string
+  type 'a instr = string
+  type 'a block = string list
+  type 'a program = string
+  type label = string
+  type info = (string list * string) option
+  type 'a obs = string
+  let rsp = "%rsp"
+  let rbp = "%rbp"
+  let rax = "%rax"
+  let rbx = "%rbx"
+  let rcx = "%rcx"
+  let rdx = "%rdx"
+  let rsi = "%rsi"
+  let rdi = "%rdi"
+  let r8 = "%r8"
+  let r9 = "%r9"
+  let r10 = "%r10"
+  let r11 = "%r11"
+  let r12 = "%r12"
+  let r13 = "%r13"
+  let r14 = "%r14"
+  let r15 = "%r15"
+
+  let reg r = r
+  let deref r i = string_of_int i ^ "(" ^ r ^ ")"
+  let int i = "$" ^ string_of_int i
+  let var v = failwith @@ "Invalid var in X86Printer: " ^ v
+
+  let addq a b = "addq " ^ a ^ ", " ^ b
+  let subq a b = "subq " ^ a ^ ", " ^ b
+  let movq a b = "movq " ^ a ^ ", " ^ b
+  let retq = "retq"
+  let negq a = "negq " ^ a
+  let callq l = "callq " ^ l
+  let pushq a = "pushq " ^ a
+  let popq a = "popq " ^ a
+
+  let info ?stack_size () =
+    Option.map
+      (fun stack_size ->
+        let stack_size =
+          if (stack_size + 8) mod 16 = 0 then stack_size else stack_size + 8
+        in
+        ( [ "movq " ^ rsp ^ ", " ^ rbp; "subq " ^ int stack_size ^ ", " ^ rsp ],
+          "addq " ^ int stack_size ^ ", " ^ rsp ))
+      stack_size
+
+  let indent s = "  " ^ s
+
+  let block _ = List.map indent
+
+  let program info blocks =
+    let instrs =
+      List.concat_map (fun (label, block) -> (label ^ ":\n") :: block) blocks
+    in
+    let instrs =
+      match info with
+      | Some (header, footer) ->
+        ListUtils.add_before_end ("  " ^ footer)
+          (List.map indent header @ instrs)
+      | None -> instrs
+    in
+    String.concat "\n" @@ [ ".global _start"; ".text"; "_start:" ] @ instrs
+
+  let observe s = s
+end
+
 module Ex4 (F : R1) = struct
   open F
   let res = observe @@ program (int 52 + neg (int 10))
@@ -444,4 +524,13 @@ let run () =
             (UncoverLocals
                (C0_Pretty))
                (AssignHomes (PatchInstructions (X86_0_Pretty))))) in
-  Format.printf "Ex6 with patched instructions: %s\n" M.res
+  Format.printf "Ex6 with patched instructions: %s\n" M.res;
+  let module M =
+    Ex6
+      (ExplicateControl
+         (R1_Pretty)
+         (SelectInstructions
+            (UncoverLocals
+               (C0_Pretty))
+               (AssignHomes (PatchInstructions (X86_0_Printer))))) in
+  Format.printf "Ex6 with printed X86: \n%s\n" M.res
