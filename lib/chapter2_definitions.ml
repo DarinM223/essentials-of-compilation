@@ -213,6 +213,8 @@ module C0_Pretty = struct
   let observe p = p
 end
 
+module StringSet = Set.Make (String)
+
 module type X86_0 = sig
   type 'a reg
   val rsp : int reg
@@ -251,12 +253,14 @@ module type X86_0 = sig
   val popq : 'a arg -> unit instr
 
   type 'a block
-  type info
-  val info : ?stack_size:int -> unit -> info
-  val block : info -> unit instr list -> unit block
+  type block_info
+  type program_info
+  val block_info : ?live_after:StringSet.t -> unit -> block_info
+  val program_info : ?stack_size:int -> unit -> program_info
+  val block : block_info -> unit instr list -> unit block
 
   type 'a program
-  val program : info -> (label * unit block) list -> unit program
+  val program : program_info -> (label * unit block) list -> unit program
 
   type 'a obs
   val observe : 'a program -> 'a obs
@@ -304,7 +308,8 @@ struct
   type 'a block = 'a X_block.term
   type 'a program = 'a X_program.term
   type label = string
-  type info = F.info
+  type block_info = F.block_info
+  type program_info = F.program_info
 
   include X86_0_Reg_T (X_reg) (F)
 
@@ -323,7 +328,8 @@ struct
   let pushq a = X_instr.fwd @@ F.pushq @@ X_arg.bwd a
   let popq a = X_instr.fwd @@ F.popq @@ X_arg.bwd a
 
-  let info = F.info
+  let block_info = F.block_info
+  let program_info = F.program_info
 
   let block info instrs =
     X_block.fwd @@ F.block info @@ List.map X_instr.bwd instrs
@@ -343,7 +349,8 @@ module X86_0_Pretty = struct
   type 'a block = string
   type 'a program = string
   type label = string
-  type info = string
+  type block_info = string
+  type program_info = string
   type 'a obs = string
   let rsp = "rsp"
   let rbp = "rbp"
@@ -376,7 +383,8 @@ module X86_0_Pretty = struct
   let pushq a = "(pushq " ^ a ^ ")"
   let popq a = "(pushq " ^ a ^ ")"
 
-  let info ?stack_size () =
+  let block_info ?live_after:_ () = "()"
+  let program_info ?stack_size () =
     match stack_size with
     | Some stack_size -> "((stack_size . " ^ string_of_int stack_size ^ "))"
     | None -> "()"

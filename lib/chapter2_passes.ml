@@ -261,9 +261,10 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let info = F.info
 
   let program _ body =
-    let info' : X86.info = X86.info () in
-    X86.program info'
-      (List.map (fun (l, t) -> (l, X86.block info' (List.rev t))) body)
+    let open X86 in
+    let block_info = X86.block_info () in
+    program (program_info ())
+      (List.map (fun (l, t) -> (l, block block_info (List.rev t))) body)
 
   type 'a obs = unit X86.obs
   let observe = X86.observe
@@ -276,7 +277,8 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   type 'a block = (string -> int) -> 'a X86.block
   type 'a program = 'a X86.program
   type label = X86.label
-  type info = X86.info
+  type block_info = X86.block_info
+  type program_info = X86.program_info
 
   module X_reg = struct
     type 'a from = 'a reg
@@ -316,10 +318,11 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
         slot
     in
     let blocks = List.map (fun (l, b) -> (l, b get_stack_slot)) blocks in
-    let info = X86.info ~stack_size:!stack_size () in
+    let info = X86.program_info ~stack_size:!stack_size () in
     X86.program info blocks
 
-  let info = X86.info
+  let block_info = X86.block_info
+  let program_info = X86.program_info
 
   type 'a obs = 'a X86.obs
   let observe = X86.observe
@@ -399,7 +402,8 @@ module X86_0_Printer = struct
   type 'a block = string list
   type 'a program = string
   type label = string
-  type info = (string list * string) option
+  type block_info = string
+  type program_info = (string list * string) option
   type 'a obs = string
   let rsp = "%rsp"
   let rbp = "%rbp"
@@ -432,7 +436,8 @@ module X86_0_Printer = struct
   let pushq a = "pushq " ^ a
   let popq a = "popq " ^ a
 
-  let info ?stack_size () =
+  let block_info ?live_after:_ () = ""
+  let program_info ?stack_size () =
     Option.map
       (fun stack_size ->
         let stack_size =
