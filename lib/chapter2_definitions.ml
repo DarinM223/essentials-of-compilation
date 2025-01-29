@@ -255,7 +255,7 @@ module type X86_0 = sig
   type 'a block
   type block_info
   type program_info
-  val block_info : ?live_after:StringSet.t -> unit -> block_info
+  val block_info : ?live_after:StringSet.t array -> unit -> block_info
   val program_info : ?stack_size:int -> unit -> program_info
   val block : block_info -> unit instr list -> unit block
 
