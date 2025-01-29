@@ -11,12 +11,9 @@ module RemoveComplexPass (F : R1) = struct
     let fwd a = (Complex, a)
     let bwd (_, a) = a
   end
-  module X_program = struct
-    type 'a from = 'a F.program
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
   open X
   module IDelta = struct
     let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
@@ -171,12 +168,9 @@ module UncoverLocalsPass (F : C0) = struct
   module X_tail = MkX (struct
     type 'a t = 'a F.tail
   end)
-  module X_program = struct
-    type 'a from = 'a F.program
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
 
   module IDelta = struct
     let var v = (S.singleton v, F.var v)
@@ -280,12 +274,9 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   type block_info = X86.block_info
   type program_info = X86.program_info
 
-  module X_reg = struct
-    type 'a from = 'a reg
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
+  module X_reg = Chapter1.MkId (struct
+    type 'a t = 'a reg
+  end)
 
   include X86_0_Reg_T (X_reg) (X86)
 
@@ -329,12 +320,9 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
 end
 
 module PatchInstructionsPass (X86 : X86_0) = struct
-  module X_reg = struct
-    type 'a from = 'a X86.reg
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
+  module X_reg = Chapter1.MkId (struct
+    type 'a t = 'a X86.reg
+  end)
 
   module X_arg = struct
     type 'a from = 'a X86.arg
@@ -350,19 +338,12 @@ module PatchInstructionsPass (X86 : X86_0) = struct
     let bwd = List.hd
   end
 
-  module X_block = struct
-    type 'a from = 'a X86.block
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
-
-  module X_program = struct
-    type 'a from = 'a X86.program
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
+  module X_block = Chapter1.MkId (struct
+    type 'a t = 'a X86.block
+  end)
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a X86.program
+  end)
 
   module IDelta = struct
     let deref r i = (true, X86.deref r i)

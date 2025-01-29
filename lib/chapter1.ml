@@ -21,6 +21,15 @@ module type TRANS = sig
   val bwd : 'a term -> 'a from
 end
 
+module MkId (F : sig
+  type 'a t
+end) : TRANS with type 'a from = 'a F.t and type 'a term = 'a F.t = struct
+  type 'a from = 'a F.t
+  type 'a term = 'a from
+  let fwd a = a
+  let bwd a = a
+end
+
 module R0_T
     (X_exp : TRANS)
     (X_program : TRANS)

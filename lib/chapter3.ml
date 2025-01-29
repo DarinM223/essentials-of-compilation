@@ -1,20 +1,10 @@
 open Chapter2_definitions
 
 module UncoverLivePass (X86 : X86_0) = struct
-  module MkId (F : sig
-    type 'a t
-  end) =
-  struct
-    type 'a from = 'a F.t
-    type 'a term = 'a from
-    let fwd a = a
-    let bwd a = a
-  end
-
-  module X_reg = MkId (struct
+  module X_reg = Chapter1.MkId (struct
     type 'a t = 'a X86.reg
   end)
-  module X_arg = MkId (struct
+  module X_arg = Chapter1.MkId (struct
     type 'a t = 'a X86.arg
   end)
 
@@ -30,10 +20,10 @@ module UncoverLivePass (X86 : X86_0) = struct
     let bwd (_, a) = a
   end
 
-  module X_block = MkId (struct
+  module X_block = Chapter1.MkId (struct
     type 'a t = 'a X86.block
   end)
-  module X_program = MkId (struct
+  module X_program = Chapter1.MkId (struct
     type 'a t = 'a X86.program
   end)
 
