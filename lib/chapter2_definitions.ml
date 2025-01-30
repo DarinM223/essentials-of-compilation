@@ -213,7 +213,13 @@ module C0_Pretty = struct
   let observe p = p
 end
 
-module StringSet = Set.Make (String)
+module StringSet = struct
+  include Set.Make (String)
+  let pp fmt set =
+    let open Format in
+    let pp_sep fmt _ = fprintf fmt ";@ " in
+    fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_print_string) (to_list set)
+end
 
 module type X86_0 = sig
   type 'a reg
@@ -383,7 +389,15 @@ module X86_0_Pretty = struct
   let pushq a = "(pushq " ^ a ^ ")"
   let popq a = "(pushq " ^ a ^ ")"
 
-  let block_info ?live_after:_ () = "()"
+  let pp_live_after fmt =
+    let open Format in
+    let pp_sep fmt _ = fprintf fmt ";@ " in
+    fprintf fmt "[@[%a]@]" @@ pp_print_array ~pp_sep StringSet.pp
+
+  let block_info ?live_after () =
+    match live_after with
+    | Some live_after -> Format.asprintf "(%a)" pp_live_after live_after
+    | None -> "()"
   let program_info ?stack_size () =
     match stack_size with
     | Some stack_size -> "((stack_size . " ^ string_of_int stack_size ^ "))"
