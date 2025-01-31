@@ -50,13 +50,15 @@ module UncoverLivePass (X86 : X86_0) = struct
       in
       (ann, r)
 
-    let one_arg_instr f a = f (X_arg.bwd a) |> X_instr.fwd |> add_write a
+    let one_arg_instr f a = f (X_arg.bwd a) |> X_instr.fwd |> add_read a
     let two_arg_instr f a b =
-      f (X_arg.bwd a) (X_arg.bwd b) |> X_instr.fwd |> add_read a |> add_write b
+      f (X_arg.bwd a) (X_arg.bwd b) |> X_instr.fwd |> add_read a |> add_read b
 
     let addq a b = two_arg_instr X86.addq a b
     let subq a b = two_arg_instr X86.subq a b
-    let movq a b = two_arg_instr X86.movq a b
+    let movq a b =
+      X86.movq (X_arg.bwd a) (X_arg.bwd b)
+      |> X_instr.fwd |> add_read a |> add_write b
     let retq = X_instr.fwd X86.retq
     let negq a = one_arg_instr X86.negq a
     let callq l = X_instr.fwd @@ X86.callq l
