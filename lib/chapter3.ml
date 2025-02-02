@@ -87,6 +87,39 @@ module UncoverLive (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
+module BuildInterferencePass (X86 : X86_0) = struct
+  type acc_graph = string StringMap.t -> string StringMap.t
+  module X_reg = Chapter1.MkId (struct
+    type 'a t = 'a X86.reg
+  end)
+  module X_arg = Chapter1.MkId (struct
+    type 'a t = 'a X86.arg
+  end)
+  module X_instr = struct
+    type 'a from = 'a X86.instr
+    type 'a term = (StringSet.t -> acc_graph) * 'a from
+    let fwd a = ((fun _ graph -> graph), a)
+    let bwd (_, a) = a
+  end
+  module X_block = struct
+    type 'a from = 'a X86.block
+    type 'a term = acc_graph * 'a from
+    let fwd a = (Fun.id, a)
+    let bwd (_, a) = a
+  end
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a X86.program
+  end)
+  module IDelta = struct end
+end
+
+module BuildInterference (F : X86_0) : X86_0 with type 'a obs = 'a F.obs =
+struct
+  module M = BuildInterferencePass (F)
+  include X86_0_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex1 (F : X86_0) = struct
   open F
 

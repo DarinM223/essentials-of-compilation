@@ -418,7 +418,7 @@ module X86_0_Printer = struct
   let popq a = "popq " ^ a
 
   let block_info ?live_after:_ () = ""
-  let program_info ?stack_size () =
+  let program_info ?stack_size ?conflicts:_ () =
     Option.map
       (fun stack_size ->
         let stack_size =

@@ -221,6 +221,15 @@ module StringSet = struct
     fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_print_string) (to_list set)
 end
 
+module StringMap = struct
+  include Map.Make (String)
+  let pp fmt map =
+    let open Format in
+    let pp_sep fmt _ = fprintf fmt ";@ " in
+    let pp_tuple fmt (a, b) = fprintf fmt "%s -> %s" a b in
+    fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_tuple) (to_list map)
+end
+
 module type X86_0 = sig
   type 'a reg
   val rsp : int reg
@@ -262,7 +271,8 @@ module type X86_0 = sig
   type block_info
   type program_info
   val block_info : ?live_after:StringSet.t array -> unit -> block_info
-  val program_info : ?stack_size:int -> unit -> program_info
+  val program_info :
+    ?stack_size:int -> ?conflicts:string StringMap.t -> unit -> program_info
   val block : block_info -> unit instr list -> unit block
 
   type 'a program
@@ -398,7 +408,7 @@ module X86_0_Pretty = struct
     match live_after with
     | Some live_after -> Format.asprintf "(%a)" pp_live_after live_after
     | None -> "()"
-  let program_info ?stack_size () =
+  let program_info ?stack_size ?conflicts:_ () =
     match stack_size with
     | Some stack_size -> "((stack_size . " ^ string_of_int stack_size ^ "))"
     | None -> "()"
