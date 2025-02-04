@@ -1,4 +1,6 @@
 (library
  (name essentials)
+ (preprocess
+  (pps ppx_deriving.std))
  (flags
   (:standard -w -57+71)))

@@ -88,13 +88,25 @@ module UncoverLive (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
 end
 
 module BuildInterferencePass (X86 : X86_0) = struct
-  type acc_graph = string StringMap.t -> string StringMap.t
+  module Arg = struct
+    type t =
+      | Reg of string
+      | Var of string
+    [@@deriving ord]
+  end
+  module ArgMap = struct
+    include Map.Make (Arg)
+  end
+  type acc_graph = string ArgMap.t -> string ArgMap.t
   module X_reg = Chapter1.MkId (struct
     type 'a t = 'a X86.reg
   end)
-  module X_arg = Chapter1.MkId (struct
-    type 'a t = 'a X86.arg
-  end)
+  module X_arg = struct
+    type 'a from = 'a X86.arg
+    type 'a term = Arg.t option * 'a from
+    let fwd a = (None, a)
+    let bwd (_, a) = a
+  end
   module X_instr = struct
     type 'a from = 'a X86.instr
     type 'a term = (StringSet.t -> acc_graph) * 'a from
@@ -110,7 +122,45 @@ module BuildInterferencePass (X86 : X86_0) = struct
   module X_program = Chapter1.MkId (struct
     type 'a t = 'a X86.program
   end)
-  module IDelta = struct end
+  module IDelta = struct
+    let var v = (Some (Arg.Var v), X86.var v)
+    let arith dest live_after graph =
+      StringSet.fold (fun v -> ArgMap.add dest v) live_after graph
+    let caller_saves = X86.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
+
+    let addq (_, a) (dest, b) =
+      match dest with
+      | Some dest -> (arith dest, X86.addq a b)
+      | None -> X_instr.fwd @@ X86.addq a b
+    let subq (_, a) (dest, b) =
+      match dest with
+      | Some dest -> (arith dest, X86.subq a b)
+      | None -> X_instr.fwd @@ X86.subq a b
+    let negq (dest, a) =
+      match dest with
+      | Some dest -> (arith dest, X86.negq a)
+      | None -> X_instr.fwd @@ X86.negq a
+    let pushq (dest, a) =
+      match dest with
+      | Some dest -> (arith dest, X86.pushq a)
+      | None -> X_instr.fwd @@ X86.pushq a
+    let popq (dest, a) =
+      match dest with
+      | Some dest -> (arith dest, X86.popq a)
+      | None -> X_instr.fwd @@ X86.popq a
+    let movq _a _b =
+      let _f live_after _graph =
+        let _edges =
+          let ( let* ) a f = List.concat_map f a in
+          let* r = caller_saves in
+          let* v = StringSet.to_list live_after in
+          [ (X86.reg r, v) ]
+        in
+        failwith ""
+      in
+      failwith ""
+    let callq _l = failwith ""
+  end
 end
 
 module BuildInterference (F : X86_0) : X86_0 with type 'a obs = 'a F.obs =
