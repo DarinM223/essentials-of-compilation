@@ -88,15 +88,6 @@ module UncoverLive (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
 end
 
 module BuildInterferencePass (X86 : X86_0) = struct
-  module Arg = struct
-    type t =
-      | Reg of string
-      | Var of string
-    [@@deriving ord]
-  end
-  module ArgMap = struct
-    include Map.Make (Arg)
-  end
   type acc_graph = string ArgMap.t -> string ArgMap.t
   module X_reg = Chapter1.MkId (struct
     type 'a t = 'a X86.reg
@@ -123,6 +114,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
   module IDelta = struct
+    let arg_of_reg reg = Arg.Reg (Hashtbl.hash reg)
+    let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
     let arith dest live_after graph =
       StringSet.fold (fun v -> ArgMap.add dest v) live_after graph
@@ -148,18 +141,55 @@ module BuildInterferencePass (X86 : X86_0) = struct
       match dest with
       | Some dest -> (arith dest, X86.popq a)
       | None -> X_instr.fwd @@ X86.popq a
-    let movq _a _b =
-      let _f live_after _graph =
-        let _edges =
+
+    let movq (src, a) (dest, b) =
+      match dest with
+      | Some dest ->
+        let acc_graph live_after graph =
+          StringSet.fold
+            (fun v graph ->
+              if Some (Arg.Var v) = src || Arg.Var v = dest then
+                graph
+              else
+                ArgMap.add dest v graph)
+            live_after graph
+        in
+        (acc_graph, X86.movq a b)
+      | None -> X_instr.fwd @@ X86.movq a b
+
+    let callq label =
+      let acc_graph live_after graph =
+        let edges =
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
           let* v = StringSet.to_list live_after in
-          [ (X86.reg r, v) ]
+          [ (arg_of_reg r, v) ]
         in
-        failwith ""
+        List.fold_left (fun graph (k, v) -> ArgMap.add k v graph) graph edges
       in
-      failwith ""
-    let callq _l = failwith ""
+      (acc_graph, X86.callq label)
+
+    let block info instrs =
+      let acc_block graph =
+        (* TODO: inline block info into block so that it has access to the live_after data.
+           Then zip the live_after sets with the block instructions and pass them into f.
+        *)
+        List.fold_left
+          (fun graph (f, _) ->
+            let live_after = failwith "" in
+            f live_after graph)
+          graph instrs
+      in
+      let instrs = List.map (fun (_, instr) -> instr) instrs in
+      (acc_block, X86.block info instrs)
+
+    let program _info blocks =
+      let interference_graph =
+        List.fold_left (fun graph (_, (f, _)) -> f graph) ArgMap.empty blocks
+      in
+      let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
+      let info = X86.program_info ~conflicts:interference_graph () in
+      X86.program info blocks
   end
 end
 

@@ -230,6 +230,17 @@ module StringMap = struct
     fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_tuple) (to_list map)
 end
 
+module Arg = struct
+  type t =
+    | Reg of int
+    | Var of string
+  [@@deriving ord]
+end
+
+module ArgMap = struct
+  include Map.Make (Arg)
+end
+
 module type X86_0 = sig
   type 'a reg
   val rsp : int reg
@@ -272,7 +283,7 @@ module type X86_0 = sig
   type program_info
   val block_info : ?live_after:StringSet.t array -> unit -> block_info
   val program_info :
-    ?stack_size:int -> ?conflicts:string StringMap.t -> unit -> program_info
+    ?stack_size:int -> ?conflicts:string ArgMap.t -> unit -> program_info
   val block : block_info -> unit instr list -> unit block
 
   type 'a program
