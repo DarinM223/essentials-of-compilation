@@ -199,7 +199,8 @@ module UncoverLocals (F : C0) : C0 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module SelectInstructions (F : C0) (X86 : X86_0) = struct
+module SelectInstructions (F : C0) (X86 : X86_0) :
+  C0 with type 'a obs = unit X86.obs = struct
   type 'a tagged_arg = string option * 'a X86.arg
   type 'a tagged_exp =
     | Arg of 'a tagged_arg
@@ -255,10 +256,7 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let info = F.info
 
   let program _ body =
-    let open X86 in
-    let block_info = X86.block_info () in
-    program (program_info ())
-      (List.map (fun (l, t) -> (l, block block_info (List.rev t))) body)
+    X86.(program (List.map (fun (l, t) -> (l, block (List.rev t))) body))
 
   type 'a obs = unit X86.obs
   let observe = X86.observe
@@ -271,8 +269,6 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   type 'a block = (string -> int) -> 'a X86.block
   type 'a program = 'a X86.program
   type label = X86.label
-  type block_info = X86.block_info
-  type program_info = X86.program_info
 
   module X_reg = Chapter1.MkId (struct
     type 'a t = 'a reg
@@ -294,9 +290,10 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   let retq _ = X86.retq
   let callq l _ = X86.callq l
 
-  let block info instrs f = X86.block info @@ List.map (fun i -> i f) instrs
+  let block ?live_after instrs f =
+    X86.block ?live_after @@ List.map (fun i -> i f) instrs
 
-  let program _ blocks =
+  let program ?stack_size:_ ?conflicts blocks =
     let stack_size = ref 0 in
     let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
     let get_stack_slot (v : string) : int =
@@ -309,11 +306,7 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
         slot
     in
     let blocks = List.map (fun (l, b) -> (l, b get_stack_slot)) blocks in
-    let info = X86.program_info ~stack_size:!stack_size () in
-    X86.program info blocks
-
-  let block_info = X86.block_info
-  let program_info = X86.program_info
+    X86.program ~stack_size:!stack_size ?conflicts blocks
 
   type 'a obs = 'a X86.obs
   let observe = X86.observe
@@ -359,7 +352,7 @@ module PatchInstructionsPass (X86 : X86_0) = struct
       match (ismem1, ismem2) with
       | true, true -> [ X86.(movq a (reg rax)); X86.(movq (reg rax) b) ]
       | _ -> X_instr.fwd @@ X86.movq a b
-    let block info instrs = X86.block info @@ List.concat instrs
+    let block ?live_after instrs = X86.block ?live_after @@ List.concat instrs
   end
 end
 
@@ -417,8 +410,7 @@ module X86_0_Printer = struct
   let pushq a = "pushq " ^ a
   let popq a = "popq " ^ a
 
-  let block_info ?live_after:_ () = ""
-  let program_info ?stack_size ?conflicts:_ () =
+  let program_info stack_size =
     Option.map
       (fun stack_size ->
         let stack_size =
@@ -430,14 +422,14 @@ module X86_0_Printer = struct
 
   let indent s = "  " ^ s
 
-  let block _ = List.map indent
+  let block ?live_after:_ = List.map indent
 
-  let program info blocks =
+  let program ?stack_size ?conflicts:_ blocks =
     let instrs =
       List.concat_map (fun (label, block) -> (label ^ ":\n") :: block) blocks
     in
     let instrs =
-      match info with
+      match program_info stack_size with
       | Some (header, footer) ->
         ListUtils.add_before_end ("  " ^ footer)
           (List.map indent header @ instrs)

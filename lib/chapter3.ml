@@ -65,7 +65,7 @@ module UncoverLivePass (X86 : X86_0) = struct
     let pushq a = one_arg_instr X86.pushq a
     let popq a = one_arg_instr X86.pushq a
 
-    let block _ instrs =
+    let block ?live_after:_ instrs =
       let anns, instrs = List.split instrs in
       let anns = Array.of_list anns in
       let live_after = Array.make (Array.length anns) StringSet.empty in
@@ -76,8 +76,7 @@ module UncoverLivePass (X86 : X86_0) = struct
               (diff live_after.(i + 1) anns.(i + 1).X_instr.vars_write)
               anns.(i + 1).vars_read)
       done;
-      let info = X86.block_info ~live_after () in
-      X86.block info instrs
+      X86.block ~live_after instrs
   end
 end
 
@@ -169,27 +168,23 @@ module BuildInterferencePass (X86 : X86_0) = struct
       in
       (acc_graph, X86.callq label)
 
-    let block info instrs =
+    let block ?live_after instrs =
+      let live_after' = Option.value ~default:[||] live_after in
       let acc_block graph =
-        (* TODO: inline block info into block so that it has access to the live_after data.
-           Then zip the live_after sets with the block instructions and pass them into f.
-        *)
         List.fold_left
-          (fun graph (f, _) ->
-            let live_after = failwith "" in
-            f live_after graph)
-          graph instrs
+          (fun graph (live_after, (f, _)) -> f live_after graph)
+          graph
+          (List.combine (Array.to_list live_after') instrs)
       in
       let instrs = List.map (fun (_, instr) -> instr) instrs in
-      (acc_block, X86.block info instrs)
+      (acc_block, X86.block ?live_after instrs)
 
-    let program _info blocks =
+    let program ?stack_size ?conflicts:_ blocks =
       let interference_graph =
         List.fold_left (fun graph (_, (f, _)) -> f graph) ArgMap.empty blocks
       in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
-      let info = X86.program_info ~conflicts:interference_graph () in
-      X86.program info blocks
+      X86.program ?stack_size ~conflicts:interference_graph blocks
   end
 end
 
@@ -205,10 +200,10 @@ module Ex1 (F : X86_0) = struct
 
   let res =
     observe
-    @@ program (program_info ())
+    @@ program
          [
            ( "start",
-             block (block_info ())
+             block
                [
                  movq (int 1) (var "v");
                  movq (int 46) (var "w");
@@ -229,4 +224,6 @@ end
 
 let run () =
   let module M = Ex1 (UncoverLive (X86_0_Pretty)) in
-  Format.printf "Ex1: %s\n" M.res
+  Format.printf "Ex1 after uncover live: %s\n" M.res;
+  let module M = Ex1 (UncoverLive (BuildInterference (X86_0_Pretty))) in
+  Format.printf "Ex1 after build interference: %s\n" M.res

@@ -221,24 +221,20 @@ module StringSet = struct
     fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_print_string) (to_list set)
 end
 
-module StringMap = struct
-  include Map.Make (String)
-  let pp fmt map =
-    let open Format in
-    let pp_sep fmt _ = fprintf fmt ";@ " in
-    let pp_tuple fmt (a, b) = fprintf fmt "%s -> %s" a b in
-    fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_tuple) (to_list map)
-end
-
 module Arg = struct
   type t =
     | Reg of int
     | Var of string
-  [@@deriving ord]
+  [@@deriving show, ord]
 end
 
 module ArgMap = struct
   include Map.Make (Arg)
+  let pp pp_value fmt map =
+    let open Format in
+    let pp_sep fmt _ = fprintf fmt ";@ " in
+    let pp_tuple fmt (a, b) = fprintf fmt "%a -> %a" Arg.pp a pp_value b in
+    fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_tuple) (to_list map)
 end
 
 module type X86_0 = sig
@@ -279,15 +275,14 @@ module type X86_0 = sig
   val popq : 'a arg -> unit instr
 
   type 'a block
-  type block_info
-  type program_info
-  val block_info : ?live_after:StringSet.t array -> unit -> block_info
-  val program_info :
-    ?stack_size:int -> ?conflicts:string ArgMap.t -> unit -> program_info
-  val block : block_info -> unit instr list -> unit block
+  val block : ?live_after:StringSet.t array -> unit instr list -> unit block
 
   type 'a program
-  val program : program_info -> (label * unit block) list -> unit program
+  val program :
+    ?stack_size:int ->
+    ?conflicts:string ArgMap.t ->
+    (label * unit block) list ->
+    unit program
 
   type 'a obs
   val observe : 'a program -> 'a obs
@@ -335,8 +330,6 @@ struct
   type 'a block = 'a X_block.term
   type 'a program = 'a X_program.term
   type label = string
-  type block_info = F.block_info
-  type program_info = F.program_info
 
   include X86_0_Reg_T (X_reg) (F)
 
@@ -355,14 +348,12 @@ struct
   let pushq a = X_instr.fwd @@ F.pushq @@ X_arg.bwd a
   let popq a = X_instr.fwd @@ F.popq @@ X_arg.bwd a
 
-  let block_info = F.block_info
-  let program_info = F.program_info
+  let block ?live_after instrs =
+    X_block.fwd @@ F.block ?live_after @@ List.map X_instr.bwd instrs
 
-  let block info instrs =
-    X_block.fwd @@ F.block info @@ List.map X_instr.bwd instrs
-
-  let program info blocks =
-    X_program.fwd @@ F.program info
+  let program ?stack_size ?conflicts blocks =
+    X_program.fwd
+    @@ F.program ?stack_size ?conflicts
     @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
 
   type 'a obs = 'a F.obs
@@ -415,19 +406,33 @@ module X86_0_Pretty = struct
     let pp_sep fmt _ = fprintf fmt ";@ " in
     fprintf fmt "[@[%a]@]" @@ pp_print_array ~pp_sep StringSet.pp
 
-  let block_info ?live_after () =
+  let block_info live_after =
     match live_after with
     | Some live_after -> Format.asprintf "(%a)" pp_live_after live_after
     | None -> "()"
-  let program_info ?stack_size ?conflicts:_ () =
-    match stack_size with
-    | Some stack_size -> "((stack_size . " ^ string_of_int stack_size ^ "))"
-    | None -> "()"
+  let program_info stack_size conflicts =
+    let enclose s = "(" ^ s ^ ")" in
+    let stack_info =
+      match stack_size with
+      | Some stack_size -> "(stack_size . " ^ string_of_int stack_size ^ ")"
+      | None -> ""
+    in
+    let conflict_info =
+      match conflicts with
+      | Some conflicts ->
+        Format.asprintf "(conflicts . %a)"
+          (ArgMap.pp Format.pp_print_string)
+          conflicts
+      | None -> ""
+    in
+    enclose (stack_info ^ conflict_info)
 
-  let block info instrs =
-    "(block " ^ info ^ "\n" ^ String.concat "\n" instrs ^ ")"
-  let program info body =
-    "(program " ^ info ^ " "
+  let block ?live_after instrs =
+    "(block " ^ block_info live_after ^ "\n" ^ String.concat "\n" instrs ^ ")"
+  let program ?stack_size ?conflicts body =
+    "(program "
+    ^ program_info stack_size conflicts
+    ^ " "
     ^ String.concat "\n"
         (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
     ^ ")"
