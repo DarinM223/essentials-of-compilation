@@ -280,7 +280,7 @@ module type X86_0 = sig
   type 'a program
   val program :
     ?stack_size:int ->
-    ?conflicts:string ArgMap.t ->
+    ?conflicts:StringSet.t ArgMap.t ->
     (label * unit block) list ->
     unit program
 
@@ -420,9 +420,7 @@ module X86_0_Pretty = struct
     let conflict_info =
       match conflicts with
       | Some conflicts ->
-        Format.asprintf "(conflicts . %a)"
-          (ArgMap.pp Format.pp_print_string)
-          conflicts
+        Format.asprintf "(conflicts . %a)" (ArgMap.pp StringSet.pp) conflicts
       | None -> ""
     in
     enclose (stack_info ^ conflict_info)
