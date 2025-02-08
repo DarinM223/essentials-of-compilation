@@ -1,6 +1,6 @@
 (library
  (name essentials)
  (preprocess
-  (pps ppx_deriving.std))
+  (pps ppx_deriving.std ppx_hash))
  (flags
   (:standard -w -57+71)))

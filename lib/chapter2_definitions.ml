@@ -222,10 +222,12 @@ module StringSet = struct
 end
 
 module Arg = struct
+  open Ppx_hash_lib.Std.Hash.Builtin
+
   type t =
     | Reg of int
     | Var of string
-  [@@deriving show, ord]
+  [@@deriving show, ord, eq, hash]
 end
 
 module ArgSet = struct

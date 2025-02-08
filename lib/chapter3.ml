@@ -214,6 +214,45 @@ struct
   include M.IDelta
 end
 
+module GraphUtils = struct
+  module IntSet = Set.Make (Int)
+  module ArgTable = Hashtbl.Make (Arg)
+  let neighbors graph v =
+    Option.value ~default:ArgSet.empty (ArgMap.find_opt v graph)
+  let saturation color graph v =
+    let go w acc =
+      try IntSet.add (ArgTable.find color w) acc with Not_found -> acc
+    in
+    ArgSet.fold go (neighbors graph v) IntSet.empty
+
+  let color_graph graph vars =
+    let color_table = ArgTable.create (List.length vars) in
+    let module Elem = struct
+      type t = Arg.t
+      let compare a b =
+        compare
+          (IntSet.cardinal (saturation color_table graph a))
+          (IntSet.cardinal (saturation color_table graph b))
+    end in
+    let module Worklist = Set.Make (Elem) in
+    let rec go worklist =
+      if not (Worklist.is_empty worklist) then (
+        let u = Worklist.max_elt worklist in
+        let adjacent_colors = saturation color_table graph u in
+        let rec find_color color =
+          if IntSet.mem color adjacent_colors then
+            find_color (color + 1)
+          else
+            color
+        in
+        let c = find_color 0 in
+        ArgTable.add color_table u c;
+        go (Worklist.remove u worklist))
+    in
+    go (Worklist.of_list vars);
+    ArgMap.of_seq @@ ArgTable.to_seq color_table
+end
+
 module Ex1 (F : X86_0) = struct
   open F
 
