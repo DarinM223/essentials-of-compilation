@@ -228,6 +228,14 @@ module Arg = struct
   [@@deriving show, ord]
 end
 
+module ArgSet = struct
+  include Set.Make (Arg)
+  let pp fmt set =
+    let open Format in
+    let pp_sep fmt _ = fprintf fmt ";@ " in
+    fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep Arg.pp) (to_list set)
+end
+
 module ArgMap = struct
   include Map.Make (Arg)
   let pp pp_value fmt map =
@@ -280,7 +288,7 @@ module type X86_0 = sig
   type 'a program
   val program :
     ?stack_size:int ->
-    ?conflicts:StringSet.t ArgMap.t ->
+    ?conflicts:ArgSet.t ArgMap.t ->
     (label * unit block) list ->
     unit program
 
@@ -420,7 +428,7 @@ module X86_0_Pretty = struct
     let conflict_info =
       match conflicts with
       | Some conflicts ->
-        Format.asprintf "(conflicts . %a)" (ArgMap.pp StringSet.pp) conflicts
+        Format.asprintf "(conflicts . %a)" (ArgMap.pp ArgSet.pp) conflicts
       | None -> ""
     in
     enclose (stack_info ^ conflict_info)

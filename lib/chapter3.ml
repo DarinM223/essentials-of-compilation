@@ -87,7 +87,7 @@ module UncoverLive (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
 end
 
 module BuildInterferencePass (X86 : X86_0) = struct
-  type acc_graph = StringSet.t ArgMap.t -> StringSet.t ArgMap.t
+  type acc_graph = ArgSet.t ArgMap.t -> ArgSet.t ArgMap.t
   module X_reg = Chapter1.MkId (struct
     type 'a t = 'a X86.reg
   end)
@@ -118,18 +118,21 @@ module BuildInterferencePass (X86 : X86_0) = struct
     let var v = (Some (Arg.Var v), X86.var v)
 
     let add_interference k v graph =
-      if Arg.Var v = k then
+      if k = v then
         graph
       else
-        let update = function
-          | Some set -> Some (StringSet.add v set)
-          | None -> Some (StringSet.singleton v)
+        let update k v graph =
+          let go = function
+            | Some set -> Some (ArgSet.add v set)
+            | None -> Some (ArgSet.singleton v)
+          in
+          ArgMap.update k go graph
         in
-        ArgMap.update k update graph
+        graph |> update k v |> update v k
 
     let arith dest live_after graph =
       StringSet.fold
-        (fun v graph -> add_interference dest v graph)
+        (fun v graph -> add_interference dest (Arg.Var v) graph)
         live_after graph
     let caller_saves = X86.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
 
@@ -160,7 +163,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
         let acc_graph live_after graph =
           StringSet.fold
             (fun v graph ->
-              if Some (Arg.Var v) = src || Arg.Var v = dest then
+              let v = Arg.Var v in
+              if Some v = src || v = dest then
                 graph
               else
                 add_interference dest v graph)
@@ -175,7 +179,7 @@ module BuildInterferencePass (X86 : X86_0) = struct
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
           let* v = StringSet.to_list live_after in
-          [ (arg_of_reg r, v) ]
+          [ (arg_of_reg r, Arg.Var v) ]
         in
         List.fold_left
           (fun graph (k, v) -> add_interference k v graph)
