@@ -267,7 +267,7 @@ module type X86_0 = sig
   val r15 : int reg
 
   type 'a arg
-  val reg : 'a reg -> 'a arg
+  val reg : 'b reg -> 'a arg
   val deref : 'b reg -> int -> 'a arg
   val int : int -> int arg
   val var : string -> 'a arg
