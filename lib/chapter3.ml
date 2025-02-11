@@ -233,9 +233,9 @@ module GraphUtils = struct
         let a_saturation = IntSet.cardinal (saturation color_table graph a) in
         let b_saturation = IntSet.cardinal (saturation color_table graph b) in
         if a_saturation = b_saturation then
-          compare a b
+          Arg.compare a b
         else
-          compare a_saturation b_saturation
+          Int.compare a_saturation b_saturation
     end in
     let module Worklist = Set.Make (Elem) in
     let rec go worklist =
