@@ -230,9 +230,12 @@ module GraphUtils = struct
     let module Elem = struct
       type t = Arg.t
       let compare a b =
-        compare
-          (IntSet.cardinal (saturation color_table graph a))
-          (IntSet.cardinal (saturation color_table graph b))
+        let a_saturation = IntSet.cardinal (saturation color_table graph a) in
+        let b_saturation = IntSet.cardinal (saturation color_table graph b) in
+        if a_saturation = b_saturation then
+          compare a b
+        else
+          compare a_saturation b_saturation
     end in
     let module Worklist = Set.Make (Elem) in
     let rec go worklist =
@@ -298,9 +301,13 @@ struct
   let program ?stack_size:_ ?(conflicts = ArgMap.empty) blocks =
     let stack_size = ref 0 in
     let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
+    (* Remove rax from the interference graph *)
+    let rax = Arg.Reg (Hashtbl.hash X86.rax) in
+    let conflicts =
+      conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
+    in
     let vars = conflicts |> ArgMap.bindings |> List.map (fun (key, _) -> key) in
     let colors = GraphUtils.color_graph conflicts vars in
-    Format.printf "Colors: %a" (ArgMap.pp Format.pp_print_int) colors;
     let get_arg (v : string) : color_result =
       let color =
         match ArgMap.find_opt (Arg.Var v) colors with
