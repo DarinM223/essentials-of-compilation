@@ -198,12 +198,12 @@ module BuildInterferencePass (X86 : X86_0) = struct
       let instrs = List.map (fun (_, instr) -> instr) instrs in
       (acc_block, X86.block ?live_after instrs)
 
-    let program ?stack_size ?conflicts:_ blocks =
+    let program ?stack_size ?conflicts:_ ?moves blocks =
       let interference_graph =
         List.fold_left (fun graph (_, (f, _)) -> f graph) ArgMap.empty blocks
       in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
-      X86.program ?stack_size ~conflicts:interference_graph blocks
+      X86.program ?stack_size ~conflicts:interference_graph ?moves blocks
   end
 end
 
@@ -298,7 +298,7 @@ struct
   let block ?live_after instrs f =
     X86.block ?live_after @@ List.map (fun i -> i f) instrs
 
-  let program ?stack_size:_ ?(conflicts = ArgMap.empty) blocks =
+  let program ?stack_size:_ ?(conflicts = ArgMap.empty) ?moves:_ blocks =
     let stack_size = ref 0 in
     let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
     (* Remove rax from the interference graph *)

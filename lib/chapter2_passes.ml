@@ -293,7 +293,7 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
   let block ?live_after instrs f =
     X86.block ?live_after @@ List.map (fun i -> i f) instrs
 
-  let program ?stack_size:_ ?conflicts blocks =
+  let program ?stack_size:_ ?conflicts ?moves blocks =
     let stack_size = ref 0 in
     let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
     let get_stack_slot (v : string) : int =
@@ -306,7 +306,7 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
         slot
     in
     let blocks = List.map (fun (l, b) -> (l, b get_stack_slot)) blocks in
-    X86.program ~stack_size:!stack_size ?conflicts blocks
+    X86.program ~stack_size:!stack_size ?conflicts ?moves blocks
 
   type 'a obs = 'a X86.obs
   let observe = X86.observe
@@ -424,7 +424,7 @@ module X86_0_Printer = struct
 
   let block ?live_after:_ = List.map indent
 
-  let program ?stack_size ?conflicts:_ blocks =
+  let program ?stack_size ?conflicts:_ ?moves:_ blocks =
     let instrs =
       List.concat_map (fun (label, block) -> (label ^ ":\n") :: block) blocks
     in

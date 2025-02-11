@@ -291,6 +291,7 @@ module type X86_0 = sig
   val program :
     ?stack_size:int ->
     ?conflicts:ArgSet.t ArgMap.t ->
+    ?moves:ArgSet.t ArgMap.t ->
     (label * unit block) list ->
     unit program
 
@@ -361,9 +362,9 @@ struct
   let block ?live_after instrs =
     X_block.fwd @@ F.block ?live_after @@ List.map X_instr.bwd instrs
 
-  let program ?stack_size ?conflicts blocks =
+  let program ?stack_size ?conflicts ?moves blocks =
     X_program.fwd
-    @@ F.program ?stack_size ?conflicts
+    @@ F.program ?stack_size ?conflicts ?moves
     @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
 
   type 'a obs = 'a F.obs
@@ -420,7 +421,7 @@ module X86_0_Pretty = struct
     match live_after with
     | Some live_after -> Format.asprintf "(%a)" pp_live_after live_after
     | None -> "()"
-  let program_info stack_size conflicts =
+  let program_info stack_size conflicts moves =
     let enclose s = "(" ^ s ^ ")" in
     let stack_info =
       match stack_size with
@@ -433,13 +434,18 @@ module X86_0_Pretty = struct
         Format.asprintf "(conflicts . %a)" (ArgMap.pp ArgSet.pp) conflicts
       | None -> ""
     in
-    enclose (stack_info ^ conflict_info)
+    let move_info =
+      match moves with
+      | Some moves -> Format.asprintf "(moves . %a)" (ArgMap.pp ArgSet.pp) moves
+      | None -> ""
+    in
+    enclose (stack_info ^ conflict_info ^ move_info)
 
   let block ?live_after instrs =
     "(block " ^ block_info live_after ^ "\n" ^ String.concat "\n" instrs ^ ")"
-  let program ?stack_size ?conflicts body =
+  let program ?stack_size ?conflicts ?moves body =
     "(program "
-    ^ program_info stack_size conflicts
+    ^ program_info stack_size conflicts moves
     ^ " "
     ^ String.concat "\n"
         (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
