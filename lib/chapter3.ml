@@ -110,7 +110,7 @@ module GraphUtils = struct
     in
     ArgSet.fold go (neighbors graph v) IntSet.empty
 
-  let color_graph graph vars =
+  let color_graph moves graph vars =
     let color_table = ArgTable.create (List.length vars) in
     let module Elem = struct
       type t = Arg.t
@@ -133,7 +133,17 @@ module GraphUtils = struct
           else
             color
         in
-        let c = find_color 0 in
+        let biased_colors =
+          IntSet.filter
+            (fun color -> not (IntSet.mem color adjacent_colors))
+            (saturation color_table moves u)
+        in
+        let c =
+          if IntSet.is_empty biased_colors then
+            find_color 0
+          else
+            IntSet.min_elt biased_colors
+        in
         ArgTable.add color_table u c;
         go (Worklist.remove u worklist)
       end
@@ -364,7 +374,7 @@ struct
       conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
     in
     let vars = conflicts |> ArgMap.bindings |> List.map (fun (key, _) -> key) in
-    let colors = GraphUtils.color_graph conflicts vars in
+    let colors = GraphUtils.color_graph moves conflicts vars in
     let get_arg (v : string) : color_result =
       let color =
         match ArgMap.find_opt (Arg.Var v) colors with
