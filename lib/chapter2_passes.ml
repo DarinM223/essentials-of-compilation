@@ -331,7 +331,7 @@ module PatchInstructionsPass (X86 : X86_0) = struct
 
   module X_arg = struct
     type 'a from = 'a X86.arg
-    type 'a term = ArgInfo.t * 'a from (* true if arg is a memory reference *)
+    type 'a term = ArgInfo.t * 'a from
     let fwd a = (ArgInfo.Unk, a)
     let bwd (_, a) = a
   end
