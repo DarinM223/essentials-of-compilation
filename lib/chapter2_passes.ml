@@ -313,14 +313,26 @@ module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
 end
 
 module PatchInstructionsPass (X86 : X86_0) = struct
+  module ArgInfo = struct
+    type t =
+      | MemoryReference of int
+      | HashedRegister of int
+      | Unk
+    let equal a b =
+      match (a, b) with
+      | MemoryReference a, MemoryReference b -> a = b
+      | HashedRegister a, HashedRegister b -> a = b
+      | _, _ -> false
+  end
+
   module X_reg = Chapter1.MkId (struct
     type 'a t = 'a X86.reg
   end)
 
   module X_arg = struct
     type 'a from = 'a X86.arg
-    type 'a term = bool * 'a from (* true if arg is a memory reference *)
-    let fwd a = (false, a)
+    type 'a term = ArgInfo.t * 'a from (* true if arg is a memory reference *)
+    let fwd a = (ArgInfo.Unk, a)
     let bwd (_, a) = a
   end
 
@@ -339,19 +351,27 @@ module PatchInstructionsPass (X86 : X86_0) = struct
   end)
 
   module IDelta = struct
-    let deref r i = (true, X86.deref r i)
-    let addq (ismem1, a) (ismem2, b) =
-      match (ismem1, ismem2) with
-      | true, true -> [ X86.(movq a (reg rax)); X86.(addq (reg rax) b) ]
+    open ArgInfo
+    let reg v = (HashedRegister (Hashtbl.hash v), X86.reg v)
+    let deref r i = (MemoryReference (Hashtbl.hash (r, i)), X86.deref r i)
+    let addq (info1, a) (info2, b) =
+      match (info1, info2) with
+      | MemoryReference _, MemoryReference _ ->
+        [ X86.(movq a (reg rax)); X86.(addq (reg rax) b) ]
       | _ -> X_instr.fwd @@ X86.addq a b
-    let subq (ismem1, a) (ismem2, b) =
-      match (ismem1, ismem2) with
-      | true, true -> [ X86.(movq a (reg rax)); X86.(subq (reg rax) b) ]
+    let subq (info1, a) (info2, b) =
+      match (info1, info2) with
+      | MemoryReference _, MemoryReference _ ->
+        [ X86.(movq a (reg rax)); X86.(subq (reg rax) b) ]
       | _ -> X_instr.fwd @@ X86.subq a b
-    let movq (ismem1, a) (ismem2, b) =
-      match (ismem1, ismem2) with
-      | true, true -> [ X86.(movq a (reg rax)); X86.(movq (reg rax) b) ]
-      | _ -> X_instr.fwd @@ X86.movq a b
+    let movq (info1, a) (info2, b) =
+      if ArgInfo.equal info1 info2 then
+        []
+      else
+        match (info1, info2) with
+        | MemoryReference _, MemoryReference _ ->
+          [ X86.(movq a (reg rax)); X86.(movq (reg rax) b) ]
+        | _ -> X_instr.fwd @@ X86.movq a b
     let block ?live_after instrs = X86.block ?live_after @@ List.concat instrs
   end
 end

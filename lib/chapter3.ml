@@ -452,4 +452,14 @@ let run () =
     Ex1
       (UncoverLive
          (BuildInterference (BuildMoves (AllocateRegisters (X86_0_Pretty))))) in
-  Format.printf "Ex1 after allocate registers with move biasing: %s\n" M.res
+  Format.printf "Ex1 after allocate registers with move biasing: %s\n" M.res;
+  let open Chapter2_passes in
+  let module M =
+    Ex1
+      (UncoverLive
+         (BuildInterference
+            (BuildMoves (AllocateRegisters (PatchInstructions (X86_0_Pretty)))))) in
+  Format.printf
+    "Ex1 after allocate registers with move biasing and patching instructions: \
+     %s\n"
+    M.res
