@@ -19,7 +19,7 @@
  (name essentials)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml ppx_deriving ppx_hash)
+ (depends ocaml ppx_deriving ppx_hash ppx_expect)
  (tags
   ("add topics" "to describe" your project)))
 

@@ -54,13 +54,16 @@ struct
   let observe a = F.observe a
 end
 
-module R0_Interp = struct
+module R0_Interp (ReadInt : sig
+  val read_int : unit -> int
+end) =
+struct
   type 'a exp = 'a
 
   let int i = i
   let read () =
     print_endline "Enter integer: ";
-    read_int ()
+    ReadInt.read_int ()
   let neg i = -i
   let ( + ) = ( + )
 
@@ -185,14 +188,40 @@ module Ex3 (F : R0) = struct
   let res = observe @@ program (int 4 + neg (read () + int 2) + neg (int 3))
 end
 
-let run () =
-  let module M = Ex1 (R0_Interp) in
+let%expect_test "Example 1 evaluation" =
+  let module M = Ex1 (R0_Interp (struct
+    let read_int () =
+      let input = 9 in
+      Format.printf "%d\n" input;
+      input
+  end)) in
   Format.printf "Ex1: %d\n" M.res;
+  [%expect {|
+    Enter integer:
+    9
+    Ex1: 1
+    |}]
+
+let%expect_test "Example 1 pretty printing" =
   let module M = Ex1 (R0_Pretty) in
   Format.printf "Ex1: %s\n" M.res;
+  [%expect {| Ex1: (program (+ (read) (- (+ 5 3)))) |}]
+
+let%expect_test "Example 1 after partial evaluation" =
   let module M = Ex1 (R0_Partial (R0_Pretty)) in
   Format.printf "Ex1: %s\n" M.res;
+  [%expect {| Ex1: (program (+ (read) -8)) |}]
+
+let%expect_test "Example 2 after partial evaluation" =
   let module M = Ex2 (R0_Partial (R0_Pretty)) in
   Format.printf "Ex2: %s\n" M.res;
+  [%expect {| Ex2: (program (+ (read) 2)) |}]
+
+let%expect_test "Example 3 after partial evaluation" =
   let module M = Ex3 (R0_Partial (R0_Pretty)) in
-  Format.printf "Ex3: %s\n" M.res
+  Format.printf "Ex3: %s\n" M.res;
+  [%expect {| Ex3: (program (+ (- (read)) -1)) |}]
+
+let run () =
+  let module M = Ex1 (R0_Interp (Stdlib)) in
+  Format.printf "Ex1: %d\n" M.res
