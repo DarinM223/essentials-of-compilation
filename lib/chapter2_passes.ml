@@ -490,30 +490,73 @@ module Ex6 (F : R1) = struct
     var y
 end
 
-let run () =
+let%expect_test "Example 4 remove complex" =
   let module M = Ex4 (RemoveComplex (R1_Pretty)) in
   Format.printf "Ex4: %s\n" M.res;
+  [%expect {| Ex4: (program (let ([tmp0 (- 10)]) (+ 52 (var tmp0)))) |}]
+
+let%expect_test "Example 5 remove complex" =
   let module M = Ex5 (RemoveComplex (R1_Pretty)) in
   Format.printf "Ex5: %s\n" M.res;
+  [%expect
+    {| Ex5: (program (let ([tmp1 42]) (let ([tmp2 (var tmp1)]) (var tmp2)))) |}]
+
+let%expect_test "C0 example 1 pretty printing" =
   let module M = C0_Ex1 (C0_Pretty) in
   Format.printf "C0 Ex1: %s\n" M.res;
+  [%expect
+    {| C0 Ex1: (program ((locals . ())) ((start . (seq (assign x_1 20) (seq (assign x_2 22) (seq (assign y (+ x_1 x_2)) (return y)))))) |}]
+
+let%expect_test "Example 6 explicate control" =
   let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty)) in
   Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp5 22) (seq (assign tmp3 20) (seq (assign tmp6 (+ tmp3 tmp5)) (return tmp6)))))) |}]
+
+let%expect_test "Example 6 uncover locals" =
   let module M = Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty))) in
-  Format.printf "Ex6 with locals: %s\n" M.res;
+  Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {| Ex6: (program ((locals . (tmp10 tmp7 tmp9))) ((start . (seq (assign tmp9 22) (seq (assign tmp7 20) (seq (assign tmp10 (+ tmp7 tmp9)) (return tmp10)))))) |}]
+
+let%expect_test "Example 6 select instructions" =
   let module M =
     Ex6
       (ExplicateControl
          (R1_Pretty)
          (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))) in
-  Format.printf "Ex6 with locals: %s\n" M.res;
+  Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {|
+    Ex6: (program () (start . (block ()
+    (movq (int 22) (var tmp13))
+    (movq (int 20) (var tmp11))
+    (movq (var tmp11) (var tmp14))
+    (addq (var tmp13) (var tmp14))
+    (movq (var tmp14) (reg rax))
+    (retq))))
+    |}]
+
+let%expect_test "Example 6 assign homes" =
   let module M =
     Ex6
       (ExplicateControl
          (R1_Pretty)
          (SelectInstructions
             (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))) in
-  Format.printf "Ex6 with assigned homes: %s\n" M.res;
+  Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {|
+    Ex6: (program ((stack_size . 24)) (start . (block ()
+    (movq (int 22) (deref rbp -8))
+    (movq (int 20) (deref rbp -16))
+    (movq (deref rbp -16) (deref rbp -24))
+    (addq (deref rbp -8) (deref rbp -24))
+    (movq (deref rbp -24) (reg rax))
+    (retq))))
+    |}]
+
+let%expect_test "Example 6 patch instructions" =
   let module M =
     Ex6
       (ExplicateControl
@@ -522,7 +565,21 @@ let run () =
             (UncoverLocals
                (C0_Pretty))
                (AssignHomes (PatchInstructions (X86_0_Pretty))))) in
-  Format.printf "Ex6 with patched instructions: %s\n" M.res;
+  Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {|
+    Ex6: (program ((stack_size . 24)) (start . (block ()
+    (movq (int 22) (deref rbp -8))
+    (movq (int 20) (deref rbp -16))
+    (movq (deref rbp -16) (reg rax))
+    (movq (reg rax) (deref rbp -24))
+    (movq (deref rbp -8) (reg rax))
+    (addq (reg rax) (deref rbp -24))
+    (movq (deref rbp -24) (reg rax))
+    (retq))))
+    |}]
+
+let%expect_test "Example 6 final printed X86" =
   let module M =
     Ex6
       (ExplicateControl
@@ -531,4 +588,23 @@ let run () =
             (UncoverLocals
                (C0_Pretty))
                (AssignHomes (PatchInstructions (X86_0_Printer))))) in
-  Format.printf "Ex6 with printed X86: \n%s\n" M.res
+  Format.printf "%s\n" M.res;
+  [%expect
+    {|
+    .global _start
+    .text
+    _start:
+      movq %rsp, %rbp
+      subq $24, %rsp
+    start:
+
+      movq $22, -8(%rbp)
+      movq $20, -16(%rbp)
+      movq -16(%rbp), %rax
+      movq %rax, -24(%rbp)
+      movq -8(%rbp), %rax
+      addq %rax, -24(%rbp)
+      movq -24(%rbp), %rax
+      addq $24, %rsp
+      retq
+    |}]

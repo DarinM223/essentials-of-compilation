@@ -440,26 +440,171 @@ module Ex1 (F : X86_0) = struct
          ]
 end
 
-let run () =
+let%expect_test "Example 1 after uncover live" =
   let module M = Ex1 (UncoverLive (X86_0_Pretty)) in
-  Format.printf "Ex1 after uncover live: %s\n" M.res;
+  Format.printf "Ex1: %s\n" M.res;
+  [%expect
+    {|
+    Ex1: (program () (start . (block ([{v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {y; z};
+      {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+    (movq (int 1) (var v))
+    (movq (int 46) (var w))
+    (movq (var v) (var x))
+    (addq (int 7) (var x))
+    (movq (var x) (var y))
+    (addq (int 4) (var y))
+    (movq (var x) (var z))
+    (addq (var w) (var z))
+    (movq (var y) (var t.1))
+    (negq (var t.1))
+    (movq (var z) (reg rax))
+    (addq (var t.1) (reg rax))
+    (retq))))
+    |}]
+
+let%expect_test "Example 1 after build interference" =
   let module M = Ex1 (UncoverLive (BuildInterference (X86_0_Pretty))) in
-  Format.printf "Ex1 after build interference: %s\n" M.res;
+  Format.printf "Ex1: %s\n" M.res;
+  [%expect
+    {|
+    Ex1: (program ((conflicts . {(Chapter2_definitions.Arg.Reg 235514213) -> {(Chapter2_definitions.Arg.Var
+                                                                  "t.1")};
+                  (Chapter2_definitions.Arg.Var "t.1") -> {(Chapter2_definitions.Arg.Reg
+                                                              235514213);
+                                                           (Chapter2_definitions.Arg.Var
+                                                              "z")};
+                  (Chapter2_definitions.Arg.Var "v") -> {(Chapter2_definitions.Arg.Var
+                                                            "w")};
+                  (Chapter2_definitions.Arg.Var "w") -> {(Chapter2_definitions.Arg.Var
+                                                            "v");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "x");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "y");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "z")};
+                  (Chapter2_definitions.Arg.Var "x") -> {(Chapter2_definitions.Arg.Var
+                                                            "w");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "y")};
+                  (Chapter2_definitions.Arg.Var "y") -> {(Chapter2_definitions.Arg.Var
+                                                            "w");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "x");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "z")};
+                  (Chapter2_definitions.Arg.Var "z") -> {(Chapter2_definitions.Arg.Var
+                                                            "t.1");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "w");
+                                                         (Chapter2_definitions.Arg.Var
+                                                            "y")}})) (start . (block ([{v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {y; z};
+      {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+    (movq (int 1) (var v))
+    (movq (int 46) (var w))
+    (movq (var v) (var x))
+    (addq (int 7) (var x))
+    (movq (var x) (var y))
+    (addq (int 4) (var y))
+    (movq (var x) (var z))
+    (addq (var w) (var z))
+    (movq (var y) (var t.1))
+    (negq (var t.1))
+    (movq (var z) (reg rax))
+    (addq (var t.1) (reg rax))
+    (retq))))
+    |}]
+
+let%expect_test "Example 1 after allocate registers" =
+  let open Chapter2_passes in
   let module M =
-    Ex1 (UncoverLive (BuildInterference (AllocateRegisters (X86_0_Pretty)))) in
-  Format.printf "Ex1 after allocate registers: %s\n" M.res;
+    Ex1 (UncoverLive (BuildInterference (AllocateRegisters (X86_0_Printer)))) in
+  Format.printf "%s\n" M.res;
+  [%expect
+    {|
+    .global _start
+    .text
+    _start:
+      movq %rsp, %rbp
+      subq $8, %rsp
+    start:
+
+      movq $1, %rbx
+      movq $46, %rdx
+      movq %rbx, %rbx
+      addq $7, %rbx
+      movq %rbx, %rcx
+      addq $4, %rcx
+      movq %rbx, %rbx
+      addq %rdx, %rbx
+      movq %rcx, %rcx
+      negq %rcx
+      movq %rbx, %rax
+      addq %rcx, %rax
+      addq $8, %rsp
+      retq
+    |}]
+
+let%expect_test "Example 1 after allocate registers with move biasing" =
+  let open Chapter2_passes in
   let module M =
     Ex1
       (UncoverLive
-         (BuildInterference (BuildMoves (AllocateRegisters (X86_0_Pretty))))) in
-  Format.printf "Ex1 after allocate registers with move biasing: %s\n" M.res;
+         (BuildInterference (BuildMoves (AllocateRegisters (X86_0_Printer))))) in
+  Format.printf "%s\n" M.res;
+  [%expect
+    {|
+    .global _start
+    .text
+    _start:
+      movq %rsp, %rbp
+      subq $8, %rsp
+    start:
+
+      movq $1, %rbx
+      movq $46, %rdx
+      movq %rbx, %rbx
+      addq $7, %rbx
+      movq %rbx, %rcx
+      addq $4, %rcx
+      movq %rbx, %rbx
+      addq %rdx, %rbx
+      movq %rcx, %rcx
+      negq %rcx
+      movq %rbx, %rax
+      addq %rcx, %rax
+      addq $8, %rsp
+      retq
+    |}]
+
+let%expect_test
+    "Example 1 after allocate registers with move biasing and patching \
+     instructions" =
   let open Chapter2_passes in
   let module M =
     Ex1
       (UncoverLive
          (BuildInterference
-            (BuildMoves (AllocateRegisters (PatchInstructions (X86_0_Pretty)))))) in
-  Format.printf
-    "Ex1 after allocate registers with move biasing and patching instructions: \
-     %s\n"
-    M.res
+            (BuildMoves (AllocateRegisters (PatchInstructions (X86_0_Printer)))))) in
+  Format.printf "%s\n" M.res;
+  [%expect
+    {|
+    .global _start
+    .text
+    _start:
+      movq %rsp, %rbp
+      subq $8, %rsp
+    start:
+
+      movq $1, %rbx
+      movq $46, %rdx
+      addq $7, %rbx
+      movq %rbx, %rcx
+      addq $4, %rcx
+      addq %rdx, %rbx
+      negq %rcx
+      movq %rbx, %rax
+      addq %rcx, %rax
+      addq $8, %rsp
+      retq
+    |}]
