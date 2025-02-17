@@ -46,7 +46,10 @@ module R1_Pretty = struct
     "(let ([" ^ v ^ " " ^ e ^ "]) " ^ f v ^ ")"
 end
 
-module R1_Interp = struct
+module R1_Interp (ReadInt : sig
+  val read_int : unit -> int
+end) =
+struct
   type 'a typ =
     | TInt : int typ
     | TBool : bool typ
@@ -59,7 +62,7 @@ module R1_Interp = struct
   let int x = (TInt, x)
   let read () =
     print_endline "Enter integer: ";
-    (TInt, read_int ())
+    (TInt, ReadInt.read_int ())
   let neg (TInt, i) = (TInt, -i)
   let ( + ) (TInt, a) (TInt, b) = (TInt, a + b)
 
@@ -509,15 +512,46 @@ module C0_Ex1 (F : C0) = struct
          ]
 end
 
-let run () =
-  let module M = Ex1 (R1_Interp) in
+let%expect_test "Example 1 evaluation" =
+  let module M = Ex1 (R1_Interp (Stdlib)) in
   Format.printf "Ex1: %d\n" M.res;
-  let module M = Ex2 (R1_Interp) in
+  [%expect {| Ex1: 42 |}]
+
+let%expect_test "Example 2 evaluation" =
+  let module M = Ex2 (R1_Interp (Stdlib)) in
   Format.printf "Ex2: Result: %d Expected: %d\n" M.res M.check;
-  (* Enter 52, then 10, should produce 42, not -42 *)
-  let module M = Ex3 (R1_Interp) in
+  [%expect {| Ex2: Result: 42 Expected: 42 |}]
+
+let%expect_test "Example 3 evaluation" =
+  (* Entering 52, then 10, should produce 42, not -42 *)
+  let input = ref [ 52; 10 ] in
+  let module ReadInt = struct
+    let read_int () =
+      match !input with
+      | num :: rest ->
+        input := rest;
+        Format.printf "%d\n" num;
+        num
+      | _ -> failwith "Input not available"
+  end in
+  let module M = Ex3 (R1_Interp (ReadInt)) in
   Format.printf "Ex3: %d\n" M.res;
-  let module M = Ex1 (R1_Partial (R1_Interp)) in
+  [%expect
+    {|
+    Enter integer:
+    Enter integer:
+    52
+    10
+    Ex3: 42
+    |}]
+
+let%expect_test "Example 1 with partial evaluation" =
+  let module M = Ex1 (R1_Partial (R1_Interp (Stdlib))) in
   Format.printf "Ex1 with partial pass: %d\n" M.res;
+  [%expect {| Ex1 with partial pass: 42 |}]
+
+let%expect_test "Example 3 with partial evaluation" =
   let module M = Ex3 (R1_Pretty) in
-  Format.printf "Ex3 pretty: %s\n" M.res
+  Format.printf "Ex3 pretty: %s\n" M.res;
+  [%expect
+    {| Ex3 pretty: (program (let ([tmp0 (read)]) (let ([tmp1 (read)]) (+ (var tmp0) (- (var tmp1)))))) |}]
