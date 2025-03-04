@@ -212,6 +212,7 @@ module SelectInstructions (F : C0) (X86 : X86_0) :
   type 'a program = unit X86.program
   type var = string
   type info = F.info
+  type label = F.label
 
   let fresh =
     let c = ref (-1) in

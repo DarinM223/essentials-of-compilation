@@ -139,7 +139,10 @@ module type C0 = sig
   type 'a program
   type info
   val info : string list -> info
-  val program : info -> (string * unit tail) list -> unit program
+
+  type label = string
+
+  val program : info -> (label * unit tail) list -> unit program
 
   type 'a obs
   val observe : 'a program -> 'a obs
@@ -165,6 +168,7 @@ struct
   type 'a stmt = 'a X_stmt.term
   type 'a tail = 'a X_tail.term
   type 'a program = 'a X_program.term
+  type label = F.label
   type info = F.info
 
   let int i = X_arg.fwd @@ F.int i
@@ -206,6 +210,7 @@ module C0_Pretty = struct
 
   type 'a program = string
   type info = string
+  type label = string
   let info i = "(" ^ String.concat " " i ^ ")"
   let program info body =
     let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in

@@ -67,6 +67,41 @@ module R2_Shrink_Pretty = struct
   let if_ a b c = "(if " ^ a ^ " " ^ b ^ " " ^ c ^ ")"
 end
 
+module type C1 = sig
+  include Chapter2_definitions.C0
+  val t : bool arg
+  val f : bool arg
+
+  type cmp =
+    | Eq
+    | Lt
+  val not : bool arg -> bool exp
+  val cmp : int arg -> int arg -> bool exp
+
+  val goto : label -> unit tail
+  val if_ : bool exp -> label -> label -> unit tail
+end
+
+module type X86_1 = sig
+  include Chapter2_definitions.X86_0
+  val byte_reg : 'b reg -> 'a arg
+
+  type cc =
+    | E
+    | L
+    | Le
+    | G
+    | Ge
+
+  val xorq : 'a arg -> 'b arg -> unit instr
+  val cmpq : 'a arg -> 'b arg -> unit instr
+  val set : cc -> 'a arg -> unit instr
+  val movzbq : 'a arg -> 'b arg -> unit instr
+  val jmp : label -> unit instr
+  val jmp_if : cc -> label -> unit instr
+  val label : label -> unit instr
+end
+
 module Ex1 (F : R2) = struct
   open F
 
