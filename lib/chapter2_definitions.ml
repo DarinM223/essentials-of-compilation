@@ -229,6 +229,8 @@ module StringSet = struct
     fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_print_string) (to_list set)
 end
 
+module StringMap = Map.Make (String)
+
 module Arg = struct
   open Ppx_hash_lib.Std.Hash.Builtin
 

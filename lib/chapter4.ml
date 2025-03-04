@@ -40,23 +40,6 @@ struct
   let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
 end
 
-module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
-  module X_exp = Chapter1.MkId (struct
-    type 'a t = 'a F.exp
-  end)
-  module X_program = Chapter1.MkId (struct
-    type 'a t = 'a F.program
-  end)
-  include R2_Shrink_T (X_exp) (X_program) (F)
-  let ( - ) a b = F.(a + neg b)
-  let andd a b = F.(if_ a b f)
-  let orr a b = F.(if_ a t b)
-  let ( <> ) a b = F.(not (a = b))
-  let ( <= ) a b = F.(not (b < a))
-  let ( > ) a b = F.(b < a)
-  let ( >= ) a b = F.(not (a < b))
-end
-
 module R2_Shrink_Pretty = struct
   include Chapter2_definitions.R1_Pretty
   let t = "t"
@@ -100,6 +83,52 @@ module type X86_1 = sig
   val jmp : label -> unit instr
   val jmp_if : cc -> label -> unit instr
   val label : label -> unit instr
+end
+
+module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
+  module X_exp = Chapter1.MkId (struct
+    type 'a t = 'a F.exp
+  end)
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
+  include R2_Shrink_T (X_exp) (X_program) (F)
+  let ( - ) a b = F.(a + neg b)
+  let andd a b = F.(if_ a b f)
+  let orr a b = F.(if_ a t b)
+  let ( <> ) a b = F.(not (a = b))
+  let ( <= ) a b = F.(not (b < a))
+  let ( > ) a b = F.(b < a)
+  let ( >= ) a b = F.(not (a < b))
+end
+
+module RemoveComplex (F : R2_Shrink) : R2_Shrink with type 'a obs = 'a F.obs =
+struct
+  module M = Chapter2_passes.RemoveComplexPass (F)
+  include R2_Shrink_T (M.X) (M.X_program) (F)
+  include M.IDelta
+end
+
+module ExplicateControl (F : R2_Shrink) (C1 : C1) :
+  R2_Shrink with type 'a obs = unit C1.obs = struct
+  module M = Chapter2_passes.ExplicateControlPass (F) (C1)
+  include R2_Shrink_T (M.X) (M.X_program) (F)
+  include M.IDelta
+  open M.X
+  let t =
+    let ann, e = fwd F.t in
+    ({ ann with result = Arg C1.t }, e)
+  let f =
+    let ann, e = fwd F.f in
+    ({ ann with result = Arg C1.f }, e)
+  let not (ann, e) =
+    match ann with
+    | { result = Arg a; _ } -> ({ ann with result = Exp (C1.not a) }, F.not e)
+    | _ -> ({ ann with result = Unk }, F.not e)
+  let ( = ) a b = fwd F.(bwd a = bwd b)
+  let ( < ) a b = fwd F.(bwd a < bwd b)
+  let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
+  (* TODO add overloads to generate control flow stuff *)
 end
 
 module Ex1 (F : R2) = struct

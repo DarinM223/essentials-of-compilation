@@ -62,11 +62,21 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
       | Unk
     type 'a ann = {
       bindings : unit C0.stmt list;
+      blocks : unit C0.tail StringMap.t;
       result : 'a res;
     }
     type 'a term = 'a ann * 'a from
 
-    let fwd e = ({ bindings = []; result = Unk }, e)
+    let merge ann1 ann2 =
+      {
+        bindings = ann1.bindings @ ann2.bindings;
+        (* All blocks should be unique so there shouldn't be any
+           conflicts when merging the blocks *)
+        blocks = StringMap.union (fun _ a _ -> Some a) ann1.blocks ann2.blocks;
+        result = Unk;
+      }
+
+    let fwd e = ({ bindings = []; blocks = StringMap.empty; result = Unk }, e)
     let bwd (_, e) = e
   end
   module X_program = struct
@@ -77,42 +87,45 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
   end
   open X
   module IDelta = struct
-    let int i = ({ bindings = []; result = Arg C0.(int i) }, F.int i)
-    let read () = ({ bindings = []; result = Exp (C0.read ()) }, F.read ())
+    let int i =
+      let ann, e = fwd (F.int i) in
+      ({ ann with result = Arg C0.(int i) }, e)
+    let read () =
+      let ann, e = fwd (F.read ()) in
+      ({ ann with result = Exp (C0.read ()) }, e)
     let neg (ann, e) =
       match ann with
-      | { bindings; result = Arg a } ->
-        ({ bindings; result = Exp (C0.neg a) }, F.neg e)
-      | { bindings; _ } -> ({ bindings; result = Unk }, F.neg e)
+      | { result = Arg a; _ } -> ({ ann with result = Exp (C0.neg a) }, F.neg e)
+      | _ -> ({ ann with result = Unk }, F.neg e)
     let ( + ) (ann1, e1) (ann2, e2) =
+      let merged = merge ann1 ann2 in
       match (ann1, ann2) with
-      | { bindings = bs1; result = Arg a1 }, { bindings = bs2; result = Arg a2 }
-        ->
-        ({ bindings = bs1 @ bs2; result = Exp C0.(a1 + a2) }, F.(e1 + e2))
-      | { bindings = bs1; _ }, { bindings = bs2; _ } ->
-        ({ bindings = bs1 @ bs2; result = Unk }, F.(e1 + e2))
+      | { result = Arg a1; _ }, { result = Arg a2; _ } ->
+        ({ merged with result = Exp C0.(a1 + a2) }, F.(e1 + e2))
+      | _, _ -> (merged, F.(e1 + e2))
 
     let var v =
-      ({ bindings = []; result = Arg (C0.var (F.string_of_var v)) }, F.var v)
+      let ann, e = fwd (F.var v) in
+      ({ ann with result = Arg (C0.var (F.string_of_var v)) }, e)
 
-    let ( let* ) e f =
+    let ( let* ) (ann, e) f =
       let vRef = ref (fun () -> failwith "empty cell") in
       let exp =
-        F.( let* ) (bwd e) (fun v ->
+        F.( let* ) e (fun v ->
             (vRef := fun () -> v);
             bwd (f v))
       in
       let v = !vRef () in
       let binding_stmt =
         C0.assign (F.string_of_var v)
-          (match (fst e).result with
+          (match ann.result with
           | Arg a -> C0.arg a
           | Exp e -> e
           | Unk -> failwith "Expected expression in let*")
       in
-      let { bindings; result }, _ = f v in
-      ( { bindings = (fst e).bindings @ bindings @ [ binding_stmt ]; result },
-        exp )
+      let ann', _ = f v in
+      let ann = { (merge ann ann') with result = ann'.result } in
+      ({ ann with bindings = ann.bindings @ [ binding_stmt ] }, exp)
 
     let construct_c0 : 'a ann -> unit C0.program =
      fun ann ->
