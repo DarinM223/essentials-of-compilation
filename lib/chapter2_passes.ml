@@ -56,13 +56,16 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
   module X = struct
     type 'a from = 'a F.exp
 
+    type block_map = unit C0.tail StringMap.t
+    type update_block_map = C0.label -> C0.label -> block_map -> block_map
     type 'a res =
       | Arg of 'a C0.arg
       | Exp of 'a C0.exp
+      | If of update_block_map * bool C0.exp * C0.label * C0.label
       | Unk
     type 'a ann = {
       bindings : unit C0.stmt list;
-      blocks : unit C0.tail StringMap.t;
+      blocks : block_map;
       result : 'a res;
     }
     type 'a term = 'a ann * 'a from
@@ -117,11 +120,11 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
       in
       let v = !vRef () in
       let binding_stmt =
-        C0.assign (F.string_of_var v)
-          (match ann.result with
-          | Arg a -> C0.arg a
-          | Exp e -> e
-          | Unk -> failwith "Expected expression in let*")
+        match ann.result with
+        | Arg a -> C0.assign (F.string_of_var v) (C0.arg a)
+        | Exp e -> C0.assign (F.string_of_var v) e
+        | If (_, cond, _, _) -> C0.assign (F.string_of_var v) cond
+        | Unk -> failwith "Expected expression in let*"
       in
       let ann', _ = f v in
       let ann = { (merge ann ann') with result = ann'.result } in
@@ -132,6 +135,7 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
       let to_stmt = function
         | Arg a -> C0.(return (arg a))
         | Exp e -> C0.return e
+        | If _ -> failwith "If statement doesn't exist for C0"
         | Unk -> failwith "Unknown type"
       in
       let start =

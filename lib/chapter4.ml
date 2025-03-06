@@ -4,7 +4,7 @@ module type R2_Shrink = sig
   val f : bool exp
 
   val not : bool exp -> bool exp
-  val ( = ) : 'a exp -> 'a exp -> bool exp
+  val ( = ) : int exp -> int exp -> bool exp
   val ( < ) : int exp -> int exp -> bool exp
   val if_ : bool exp -> 'a exp -> 'a exp -> 'a exp
 end
@@ -16,7 +16,7 @@ module type R2 = sig
 
   val andd : bool exp -> bool exp -> bool exp
   val orr : bool exp -> bool exp -> bool exp
-  val ( <> ) : 'a exp -> 'a exp -> bool exp
+  val ( <> ) : int exp -> int exp -> bool exp
   val ( <= ) : int exp -> int exp -> bool exp
   val ( > ) : int exp -> int exp -> bool exp
   val ( >= ) : int exp -> int exp -> bool exp
@@ -59,7 +59,8 @@ module type C1 = sig
     | Eq
     | Lt
   val not : bool arg -> bool exp
-  val cmp : int arg -> int arg -> bool exp
+  val ( = ) : int arg -> int arg -> bool exp
+  val ( < ) : int arg -> int arg -> bool exp
 
   val goto : label -> unit tail
   val if_ : bool exp -> label -> label -> unit tail
@@ -123,10 +124,69 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
     ({ ann with result = Arg C1.f }, e)
   let not (ann, e) =
     match ann with
+    | { result = If (update, cond, t, f); _ } ->
+      (* TODO: swap the false and true block bodies *)
+      ({ ann with result = If ((fun t f -> update f t), cond, t, f) }, F.not e)
     | { result = Arg a; _ } -> ({ ann with result = Exp (C1.not a) }, F.not e)
     | _ -> ({ ann with result = Unk }, F.not e)
-  let ( = ) a b = fwd F.(bwd a = bwd b)
-  let ( < ) a b = fwd F.(bwd a < bwd b)
+
+  let fresh =
+    let c = ref (-1) in
+    fun () ->
+      incr c;
+      !c
+
+  let ( = ) (ann1, e1) (ann2, e2) =
+    let merged = merge ann1 ann2 in
+    match (ann1, ann2) with
+    | { result = Arg a1; _ }, { result = Arg a2; _ } ->
+      let t_label = "block" ^ string_of_int (fresh ()) in
+      let f_label = "block" ^ string_of_int (fresh ()) in
+      let module StringMap = Chapter2_definitions.StringMap in
+      let blocks =
+        merged.blocks
+        |> StringMap.add t_label C1.(return (arg t))
+        |> StringMap.add f_label C1.(return (arg f))
+      in
+      let update t f blocks =
+        blocks
+        |> StringMap.update t_label (fun _ -> Some (C1.goto t))
+        |> StringMap.update f_label (fun _ -> Some (C1.goto f))
+      in
+      ( {
+          merged with
+          blocks;
+          result = If (update, C1.(a1 = a2), t_label, f_label);
+        },
+        F.(e1 = e2) )
+    | _ -> (merged, F.(e1 = e2))
+
+  let ( < ) (ann1, e1) (ann2, e2) =
+    let merged = merge ann1 ann2 in
+    match (ann1, ann2) with
+    | { result = Arg a1; _ }, { result = Arg a2; _ } ->
+      let t_label = "block" ^ string_of_int (fresh ()) in
+      let f_label = "block" ^ string_of_int (fresh ()) in
+      let empty = C1.(return (arg (int 0))) in
+      let module StringMap = Chapter2_definitions.StringMap in
+      let blocks =
+        merged.blocks
+        |> StringMap.add t_label empty
+        |> StringMap.add f_label empty
+      in
+      let update t f blocks =
+        blocks
+        |> StringMap.update t_label (fun _ -> Some (C1.goto t))
+        |> StringMap.update f_label (fun _ -> Some (C1.goto f))
+      in
+      ( {
+          merged with
+          blocks;
+          result = If (update, C1.(a1 < a2), t_label, f_label);
+        },
+        F.(e1 < e2) )
+    | _ -> (merged, F.(e1 < e2))
+
   let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
   (* TODO add overloads to generate control flow stuff *)
 end
