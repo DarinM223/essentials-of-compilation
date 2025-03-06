@@ -136,7 +136,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
       incr c;
       !c
 
-  let ( = ) (ann1, e1) (ann2, e2) =
+  let handle_cond c1_cond r2_cond (ann1, e1) (ann2, e2) =
     let merged = merge ann1 ann2 in
     match (ann1, ann2) with
     | { result = Arg a1; _ }, { result = Arg a2; _ } ->
@@ -156,36 +156,13 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
       ( {
           merged with
           blocks;
-          result = If (update, C1.(a1 = a2), t_label, f_label);
+          result = If (update, c1_cond a1 a2, t_label, f_label);
         },
-        F.(e1 = e2) )
-    | _ -> (merged, F.(e1 = e2))
+        r2_cond e1 e2 )
+    | _ -> (merged, r2_cond e1 e2)
 
-  let ( < ) (ann1, e1) (ann2, e2) =
-    let merged = merge ann1 ann2 in
-    match (ann1, ann2) with
-    | { result = Arg a1; _ }, { result = Arg a2; _ } ->
-      let t_label = "block" ^ string_of_int (fresh ()) in
-      let f_label = "block" ^ string_of_int (fresh ()) in
-      let empty = C1.(return (arg (int 0))) in
-      let module StringMap = Chapter2_definitions.StringMap in
-      let blocks =
-        merged.blocks
-        |> StringMap.add t_label empty
-        |> StringMap.add f_label empty
-      in
-      let update t f blocks =
-        blocks
-        |> StringMap.update t_label (fun _ -> Some (C1.goto t))
-        |> StringMap.update f_label (fun _ -> Some (C1.goto f))
-      in
-      ( {
-          merged with
-          blocks;
-          result = If (update, C1.(a1 < a2), t_label, f_label);
-        },
-        F.(e1 < e2) )
-    | _ -> (merged, F.(e1 < e2))
+  let ( = ) = handle_cond C1.( = ) F.( = )
+  let ( < ) = handle_cond C1.( < ) F.( < )
 
   let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
   (* TODO add overloads to generate control flow stuff *)
