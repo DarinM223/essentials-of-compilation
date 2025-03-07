@@ -23,6 +23,15 @@ struct
   let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 end
 
+module R1_R_T (R : Chapter1.Reader) (F : R1) = struct
+  include Chapter1.R0_R_T (R) (F)
+  type 'a var = 'a F.var
+
+  let var = F.var
+  let string_of_var = F.string_of_var
+  let ( let* ) e f r = F.( let* ) (e r) (fun v -> f v r)
+end
+
 module R1_Partial (F : R1) : R1 with type 'a obs = 'a F.program = struct
   module M = Chapter1.R0_Partial_Pass (F)
   include R1_T (M.X) (M.X_program) (F)

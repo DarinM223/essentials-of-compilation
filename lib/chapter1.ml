@@ -54,6 +54,25 @@ struct
   let observe a = F.observe a
 end
 
+module type Reader = sig
+  type t
+  val init : t (* Initial state *)
+end
+
+module R0_R_T (R : Reader) (F : R0) = struct
+  type 'a exp = R.t -> 'a F.exp
+  type 'a program = unit -> 'a F.program
+
+  let int i _ = F.int i
+  let read () _ = F.read ()
+  let neg e r = F.neg (e r)
+  let ( + ) a b r = F.(a r + b r)
+  let program e () = F.program (e R.init)
+
+  type 'a obs = 'a F.obs
+  let observe a = F.observe (a ())
+end
+
 module R0_Interp (ReadInt : sig
   val read_int : unit -> int
 end) =
