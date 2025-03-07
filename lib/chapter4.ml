@@ -55,15 +55,24 @@ module type C1 = sig
   val t : bool arg
   val f : bool arg
 
-  type cmp =
-    | Eq
-    | Lt
   val not : bool arg -> bool exp
   val ( = ) : int arg -> int arg -> bool exp
   val ( < ) : int arg -> int arg -> bool exp
 
   val goto : label -> unit tail
   val if_ : bool exp -> label -> label -> unit tail
+end
+
+module C1_Pretty = struct
+  include Chapter2_definitions.C0_Pretty
+  let t = "t"
+  let f = "f"
+  let not a = "(not " ^ a ^ ")"
+  let ( = ) a b = "(= " ^ a ^ " " ^ b ^ ")"
+  let ( < ) a b = "(< " ^ a ^ " " ^ b ^ ")"
+
+  let goto l = "(goto " ^ l ^ ")"
+  let if_ a b c = "(if " ^ a ^ " " ^ b ^ " " ^ c ^ ")"
 end
 
 module type X86_1 = sig
@@ -116,6 +125,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   include R2_Shrink_T (M.X) (M.X_program) (F)
   include M.IDelta
   open M.X
+  open Chapter2_definitions
   let t =
     let ann, e = fwd F.t in
     ({ ann with result = Arg C1.t }, e)
@@ -125,8 +135,14 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   let not (ann, e) =
     match ann with
     | { result = If (update, cond, t, f); _ } ->
-      (* TODO: swap the false and true block bodies *)
-      ({ ann with result = If ((fun t f -> update f t), cond, t, f) }, F.not e)
+      (* Swap the false and true block bodies *)
+      let blocks =
+        ann.blocks
+        |> StringMap.update t (fun _ -> StringMap.find_opt f ann.blocks)
+        |> StringMap.update f (fun _ -> StringMap.find_opt t ann.blocks)
+      in
+      ( { ann with blocks; result = If ((fun t f -> update f t), cond, t, f) },
+        F.not e )
     | { result = Arg a; _ } -> ({ ann with result = Exp (C1.not a) }, F.not e)
     | _ -> ({ ann with result = Unk }, F.not e)
 
@@ -136,13 +152,28 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
       incr c;
       !c
 
+  let add_ann_block : 'a ann -> block_map -> C1.label * block_map =
+   fun ann blocks ->
+    let to_stmt = function
+      | Arg a -> C1.(return (arg a))
+      | Exp e -> C1.return e
+      | If (_update, cond, t, f) -> C1.if_ cond t f
+      | Unk -> failwith "Unknown type"
+    in
+    let tail =
+      match ann.bindings with
+      | [] -> to_stmt ann.result
+      | _ -> List.fold_right C1.( @> ) ann.bindings (to_stmt ann.result)
+    in
+    let new_block_label = "block" ^ string_of_int (fresh ()) in
+    (new_block_label, StringMap.add new_block_label tail blocks)
+
   let handle_cond c1_cond r2_cond (ann1, e1) (ann2, e2) =
     let merged = merge ann1 ann2 in
     match (ann1, ann2) with
     | { result = Arg a1; _ }, { result = Arg a2; _ } ->
       let t_label = "block" ^ string_of_int (fresh ()) in
       let f_label = "block" ^ string_of_int (fresh ()) in
-      let module StringMap = Chapter2_definitions.StringMap in
       let blocks =
         merged.blocks
         |> StringMap.add t_label C1.(return (arg t))
@@ -164,8 +195,17 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   let ( = ) = handle_cond C1.( = ) F.( = )
   let ( < ) = handle_cond C1.( < ) F.( < )
 
-  let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
-  (* TODO add overloads to generate control flow stuff *)
+  let if_ _a _b _c =
+    (* TODO: create blocks for the then and else branches
+       if conditional has an update function, call it in here
+    *)
+    failwith "if statement not handled yet"
+
+  let construct_c1 ann =
+    let _, blocks = add_ann_block ann ann.blocks in
+    C1.(program (info []) (StringMap.to_list blocks))
+
+  let program (ann, e) = (Some (construct_c1 ann), F.program e)
 end
 
 module Ex1 (F : R2) = struct
@@ -179,8 +219,42 @@ module Ex1 (F : R2) = struct
     if_ (andd (var a <= int 5) (var b > var a)) (var b - var a) (var b + var a)
 end
 
+module Ex2 (F : R2) = struct
+  open F
+  let res =
+    observe @@ program
+    @@
+    let* a = int 2 in
+    if_ (var a < int 5) (var a + int 1) (int 6 + int 7)
+end
+
+module Ex3 (F : R2) = struct
+  open F
+  let res =
+    observe @@ program
+    @@ let* a = int 2 in
+       var a < int 5
+end
+
 let%expect_test "Example 1 shrink" =
   let module M = Ex1 (Shrink (R2_Shrink_Pretty)) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {| Ex1: (program (let ([tmp0 2]) (let ([tmp1 (read)]) (if (if (not (< 5 (var tmp0))) (< (var tmp0) (var tmp1)) f) (+ (var tmp1) (- (var tmp0))) (+ (var tmp1) (var tmp0)))))) |}]
+
+let%expect_test "Remove complex with simple conditional" =
+  let module M = Ex2 (Shrink (RemoveComplex (R2_Shrink_Pretty))) in
+  Format.printf "Ex2: %s\n" M.res;
+  [%expect
+    {| Ex2: (program (let ([tmp2 2]) (if (< (var tmp2) 5) (+ (var tmp2) 1) (+ 6 7)))) |}]
+
+let%expect_test "Explicate control with simple conditional" =
+  let module M =
+    Ex3 (Shrink (RemoveComplex (ExplicateControl (R2_Shrink_Pretty) (C1_Pretty)))) in
+  Format.printf "Ex3: %s\n" M.res;
+  [%expect
+    {|
+    Ex3: (program ((locals . ())) ((block2 . (return t))
+    (block3 . (return f))
+    (block4 . (seq (assign tmp3 2) (if (< tmp3 5) block2 block3))))
+    |}]

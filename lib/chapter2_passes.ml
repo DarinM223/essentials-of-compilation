@@ -18,6 +18,7 @@ module RemoveComplexPass (F : R1) = struct
   module IDelta = struct
     let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 
+    let var v = (Simple, F.var v)
     let int i = (Simple, F.int i)
     let read () = (Complex, F.read ())
     let neg (ann, e) =
