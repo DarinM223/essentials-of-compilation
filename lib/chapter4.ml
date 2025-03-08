@@ -139,17 +139,14 @@ end
 module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   R2_Shrink with type 'a obs = unit C1.obs = struct
   module M = Chapter2_passes.ExplicateControlPass (F) (C1)
-  include R2_Shrink_T (M.X) (M.X_program) (F)
+  include R2_Shrink_R_T (M.X_reader) (R2_Shrink_T (M.X) (M.X_program) (F))
   include M.IDelta
   open M.X
   open Chapter2_definitions
-  let t =
-    let ann, e = fwd F.t in
-    ({ ann with result = Arg C1.t }, e)
-  let f =
-    let ann, e = fwd F.f in
-    ({ ann with result = Arg C1.f }, e)
-  let not (ann, e) =
+  let t _ = ({ empty_ann with result = Arg C1.t }, F.t)
+  let f _ = ({ empty_ann with result = Arg C1.f }, F.f)
+  let not e r =
+    let ann, e = e r in
     match ann with
     | { result = If (update, cond, t, f); _ } ->
       (* Swap the false and true block bodies *)
@@ -188,7 +185,9 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
     in
     (new_block_label, StringMap.add new_block_label tail blocks)
 
-  let handle_cond c1_cond r2_cond (ann1, e1) (ann2, e2) =
+  let handle_cond c1_cond r2_cond e1 e2 r =
+    let ann1, e1 = e1 r in
+    let ann2, e2 = e2 r in
     let merged = merge ann1 ann2 in
     match (ann1, ann2) with
     | { result = Arg a1; _ }, { result = Arg a2; _ } ->
@@ -212,7 +211,10 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   let ( = ) = handle_cond C1.( = ) F.( = )
   let ( < ) = handle_cond C1.( < ) F.( < )
 
-  let if_ (ann1, cond) (ann2, th) (ann3, els) =
+  let if_ cond th els r =
+    let ann1, cond = cond r in
+    let ann2, th = th r in
+    let ann3, els = els r in
     let blocks = ann1.blocks in
     let then_label, blocks = add_ann_block ann2 blocks in
     let else_label, blocks = add_ann_block ann3 blocks in
@@ -234,7 +236,9 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
     let _, blocks = add_ann_block ~label:"start" ann ann.blocks in
     C1.(program (info []) (StringMap.to_list blocks))
 
-  let program (ann, e) = (Some (construct_c1 ann), F.program e)
+  let program e () =
+    let ann, e = e M.X_reader.init in
+    (Some (construct_c1 ann), F.program e)
 end
 
 module Ex1 (F : R2) = struct

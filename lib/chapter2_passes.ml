@@ -80,44 +80,49 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
         result = Unk;
       }
 
-    let fwd e = ({ bindings = []; blocks = StringMap.empty; result = Unk }, e)
+    let empty_ann = { bindings = []; blocks = StringMap.empty; result = Unk }
+
+    let fwd e = (empty_ann, e)
     let bwd (_, e) = e
   end
   module X_program = struct
     type 'a from = 'a F.program
-    type 'a term = unit C0.program option * 'a F.program
+    type 'a term = unit C0.program option * 'a from
     let fwd p = (None, p)
     let bwd (_, p) = p
   end
+  module X_reader = struct
+    type t = unit
+    let init = ()
+  end
   open X
   module IDelta = struct
-    let int i =
-      let ann, e = fwd (F.int i) in
-      ({ ann with result = Arg C0.(int i) }, e)
-    let read () =
-      let ann, e = fwd (F.read ()) in
-      ({ ann with result = Exp (C0.read ()) }, e)
-    let neg (ann, e) =
+    let int i _ = ({ empty_ann with result = Arg C0.(int i) }, F.int i)
+    let read () _ = ({ empty_ann with result = Exp (C0.read ()) }, F.read ())
+    let neg e r =
+      let ann, e = e r in
       match ann with
       | { result = Arg a; _ } -> ({ ann with result = Exp (C0.neg a) }, F.neg e)
       | _ -> ({ ann with result = Unk }, F.neg e)
-    let ( + ) (ann1, e1) (ann2, e2) =
+    let ( + ) e1 e2 r =
+      let ann1, e1 = e1 r in
+      let ann2, e2 = e2 r in
       let merged = merge ann1 ann2 in
       match (ann1, ann2) with
       | { result = Arg a1; _ }, { result = Arg a2; _ } ->
         ({ merged with result = Exp C0.(a1 + a2) }, F.(e1 + e2))
       | _, _ -> (merged, F.(e1 + e2))
 
-    let var v =
-      let ann, e = fwd (F.var v) in
-      ({ ann with result = Arg (C0.var (F.string_of_var v)) }, e)
+    let var v _ =
+      ({ empty_ann with result = Arg (C0.var (F.string_of_var v)) }, F.var v)
 
-    let ( let* ) (ann, e) f =
+    let ( let* ) e f r =
+      let ann, e = e r in
       let vRef = ref (fun () -> failwith "empty cell") in
       let exp =
         F.( let* ) e (fun v ->
             (vRef := fun () -> v);
-            bwd (f v))
+            bwd (f v r))
       in
       let v = !vRef () in
       let binding_stmt =
@@ -127,7 +132,7 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
         | If (_, cond, _, _) -> C0.assign (F.string_of_var v) cond
         | Unk -> failwith "Expected expression in let*"
       in
-      let ann', _ = f v in
+      let ann', _ = f v r in
       let ann = { (merge ann ann') with result = ann'.result } in
       ({ ann with bindings = ann.bindings @ [ binding_stmt ] }, exp)
 
@@ -146,20 +151,22 @@ module ExplicateControlPass (F : R1) (C0 : C0) = struct
       in
       C0.(program (info []) [ ("start", start) ])
 
-    let program (ann, e) = (Some (construct_c0 ann), F.program e)
+    let program e () =
+      let ann, e = e X_reader.init in
+      (Some (construct_c0 ann), F.program e)
 
     type 'a obs = unit C0.obs
-    let observe (p, _) =
-      match p with
-      | Some p -> C0.observe p
-      | None -> failwith "Cannot decode program"
+    let observe p =
+      match p () with
+      | Some p, _ -> C0.observe p
+      | _ -> failwith "Cannot decode program"
   end
 end
 
 module ExplicateControl (F : R1) (C0 : C0) : R1 with type 'a obs = unit C0.obs =
 struct
   module M = ExplicateControlPass (F) (C0)
-  include R1_T (M.X) (M.X_program) (F)
+  include R1_R_T (M.X_reader) (R1_T (M.X) (M.X_program) (F))
   include M.IDelta
 end
 

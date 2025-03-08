@@ -13,8 +13,12 @@ module R1_T
     (F :
       R1
         with type 'a exp = 'a X_exp.from
-         and type 'a program = 'a X_program.from) =
-struct
+         and type 'a program = 'a X_program.from) :
+  R1
+    with type 'a exp = 'a X_exp.term
+     and type 'a program = 'a X_program.term
+     and type 'a var = 'a F.var
+     and type 'a obs = 'a F.obs = struct
   include Chapter1.R0_T (X_exp) (X_program) (F)
   open X_exp
   type 'a var = 'a F.var
@@ -23,11 +27,16 @@ struct
   let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 end
 
-module R1_R_T (R : Chapter1.Reader) (F : R1) = struct
+module R1_R_T (R : Chapter1.Reader) (F : R1) :
+  R1
+    with type 'a exp = R.t -> 'a F.exp
+     and type 'a program = unit -> 'a F.program
+     and type 'a var = 'a F.var
+     and type 'a obs = 'a F.obs = struct
   include Chapter1.R0_R_T (R) (F)
   type 'a var = 'a F.var
 
-  let var = F.var
+  let var v _ = F.var v
   let string_of_var = F.string_of_var
   let ( let* ) e f r = F.( let* ) (e r) (fun v -> f v r)
 end

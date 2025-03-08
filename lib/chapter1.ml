@@ -36,8 +36,11 @@ module R0_T
     (F :
       R0
         with type 'a exp = 'a X_exp.from
-         and type 'a program = 'a X_program.from) =
-struct
+         and type 'a program = 'a X_program.from) :
+  R0
+    with type 'a exp = 'a X_exp.term
+     and type 'a program = 'a X_program.term
+     and type 'a obs = 'a F.obs = struct
   open X_exp
 
   type 'a exp = 'a term
@@ -51,7 +54,7 @@ struct
   let program e = X_program.fwd @@ F.program (bwd e)
 
   type 'a obs = 'a F.obs
-  let observe a = F.observe a
+  let observe a = F.observe @@ X_program.bwd a
 end
 
 module type Reader = sig
@@ -59,7 +62,11 @@ module type Reader = sig
   val init : t (* Initial state *)
 end
 
-module R0_R_T (R : Reader) (F : R0) = struct
+module R0_R_T (R : Reader) (F : R0) :
+  R0
+    with type 'a exp = R.t -> 'a F.exp
+     and type 'a program = unit -> 'a F.program
+     and type 'a obs = 'a F.obs = struct
   type 'a exp = R.t -> 'a F.exp
   type 'a program = unit -> 'a F.program
 
