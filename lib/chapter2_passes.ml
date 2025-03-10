@@ -53,121 +53,65 @@ module RemoveComplex (F : R1) : R1 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module ExplicateControlPass (F : R1) (C0 : C0) = struct
-  module X = struct
-    type 'a from = 'a F.exp
+module ExplicateControl (F : R1) (C0 : C0) () :
+  R1 with type 'a obs = unit C0.obs = struct
+  type ctx =
+    | Tail
+    | Assign of string * (unit -> unit C0.tail)
+    | Pred of unit C0.tail * unit C0.tail
+  type 'a exp = ctx -> unit C0.tail
+  type 'a program = unit -> unit C0.program
+  type 'a var = 'a F.var
 
-    type block_map = unit C0.tail StringMap.t
-    type update_block_map = C0.label -> C0.label -> block_map -> block_map
-    type 'a res =
-      | Arg of 'a C0.arg
-      | Exp of 'a C0.exp
-      | If of update_block_map * bool C0.exp * C0.label * C0.label
-      | Unk
-    type 'a ann = {
-      bindings : unit C0.stmt list;
-      blocks : block_map;
-      result : 'a res;
-    }
-    type 'a term = 'a ann * 'a from
+  let table : (string, string) Hashtbl.t = Hashtbl.create 100
+  let rec lookup v = try lookup (Hashtbl.find table v) with Not_found -> v
 
-    let merge ann1 ann2 =
-      {
-        bindings = ann1.bindings @ ann2.bindings;
-        (* All blocks should be unique so there shouldn't be any
-           conflicts when merging the blocks *)
-        blocks = StringMap.union (fun _ a _ -> Some a) ann1.blocks ann2.blocks;
-        result = Unk;
-      }
+  let string_of_var = F.string_of_var
+  let fresh = F.fresh
 
-    let empty_ann = { bindings = []; blocks = StringMap.empty; result = Unk }
+  let convert_exp e = function
+    | Tail -> C0.return e
+    | Assign (v, body) -> C0.(assign v e @> body ())
+    | Pred _ ->
+      failwith "Cannot have a non-boolean expression inside of a predicate"
+  let int i = convert_exp C0.(arg (int i))
 
-    let fwd e = (empty_ann, e)
-    let bwd (_, e) = e
-  end
-  module X_program = struct
-    type 'a from = 'a F.program
-    type 'a term = unit C0.program option * 'a from
-    let fwd p = (None, p)
-    let bwd (_, p) = p
-  end
-  module X_reader = struct
-    type t = unit
-    let init = ()
-  end
-  open X
-  module IDelta = struct
-    let int i _ = ({ empty_ann with result = Arg C0.(int i) }, F.int i)
-    let read () _ = ({ empty_ann with result = Exp (C0.read ()) }, F.read ())
-    let neg e r =
-      let ann, e = e r in
-      match ann with
-      | { result = Arg a; _ } -> ({ ann with result = Exp (C0.neg a) }, F.neg e)
-      | _ -> ({ ann with result = Unk }, F.neg e)
-    let ( + ) e1 e2 r =
-      let ann1, e1 = e1 r in
-      let ann2, e2 = e2 r in
-      let merged = merge ann1 ann2 in
-      match (ann1, ann2) with
-      | { result = Arg a1; _ }, { result = Arg a2; _ } ->
-        ({ merged with result = Exp C0.(a1 + a2) }, F.(e1 + e2))
-      | _, _ -> (merged, F.(e1 + e2))
+  let read () = convert_exp C0.(read ())
+  let neg e r =
+    let tmp = F.(string_of_var (fresh ())) in
+    e (Assign (tmp, fun () -> convert_exp C0.(neg (var (lookup tmp))) r))
 
-    let var v _ =
-      ({ empty_ann with result = Arg (C0.var (F.string_of_var v)) }, F.var v)
+  let ( + ) e1 e2 r =
+    let tmp1 = F.(string_of_var (fresh ())) in
+    let tmp2 = F.(string_of_var (fresh ())) in
+    e1
+      (Assign
+         ( tmp1,
+           fun () ->
+             e2
+               (Assign
+                  ( tmp2,
+                    fun () ->
+                      convert_exp C0.(var (lookup tmp1) + var (lookup tmp2)) r
+                  )) ))
 
-    let ( let* ) e f r =
-      let ann, e = e r in
-      let vRef = ref (fun () -> failwith "empty cell") in
-      let exp =
-        F.( let* ) e (fun v ->
-            (vRef := fun () -> v);
-            bwd (f v r))
-      in
-      let v = !vRef () in
-      let binding_stmt =
-        match ann.result with
-        | Arg a -> C0.assign (F.string_of_var v) (C0.arg a)
-        | Exp e -> C0.assign (F.string_of_var v) e
-        | If (_, cond, _, _) -> C0.assign (F.string_of_var v) cond
-        | Unk -> failwith "Expected expression in let*"
-      in
-      let ann', _ = f v r in
-      let ann = { (merge ann ann') with result = ann'.result } in
-      ({ ann with bindings = ann.bindings @ [ binding_stmt ] }, exp)
+  let var v r =
+    let v = lookup (F.string_of_var v) in
+    match r with
+    | Tail -> C0.(return (arg (var v)))
+    | Assign (v', body) ->
+      Hashtbl.add table v' v;
+      body ()
+    | Pred _ -> failwith "Predicate for var not handled yet"
 
-    let construct_c0 : 'a ann -> unit C0.program =
-     fun ann ->
-      let to_stmt = function
-        | Arg a -> C0.(return (arg a))
-        | Exp e -> C0.return e
-        | If _ -> failwith "If statement doesn't exist for C0"
-        | Unk -> failwith "Unknown type"
-      in
-      let start =
-        match ann.bindings with
-        | [] -> to_stmt ann.result
-        | _ -> List.fold_right C0.( @> ) ann.bindings (to_stmt ann.result)
-      in
-      C0.(program (info []) [ ("start", start) ])
+  let ( let* ) e f r =
+    let tmp = F.fresh () in
+    e (Assign (F.string_of_var tmp, fun () -> f tmp r))
 
-    let program e () =
-      let ann, e = e X_reader.init in
-      (Some (construct_c0 ann), F.program e)
+  let program e () = C0.(program (info []) [ ("start", e Tail) ])
 
-    type 'a obs = unit C0.obs
-    let observe p =
-      match p () with
-      | Some p, _ -> C0.observe p
-      | _ -> failwith "Cannot decode program"
-  end
-end
-
-module ExplicateControl (F : R1) (C0 : C0) : R1 with type 'a obs = unit C0.obs =
-struct
-  module M = ExplicateControlPass (F) (C0)
-  include R1_R_T (M.X_reader) (R1_T (M.X) (M.X_program) (F))
-  include M.IDelta
+  type 'a obs = unit C0.obs
+  let observe p = C0.observe (p ())
 end
 
 module UncoverLocalsPass (F : C0) = struct
@@ -534,32 +478,34 @@ let%expect_test "C0 example 1 pretty printing" =
     {| C0 Ex1: (program ((locals . ())) ((start . (seq (assign x_1 20) (seq (assign x_2 22) (seq (assign y (+ x_1 x_2)) (return y)))))) |}]
 
 let%expect_test "Example 6 explicate control" =
-  let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty)) in
+  let module M = Ex6 (ExplicateControl (R1_Pretty) (C0_Pretty) ()) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
-    {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp5 22) (seq (assign tmp3 20) (seq (assign tmp6 (+ tmp3 tmp5)) (return tmp6)))))) |}]
+    {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp4 20) (seq (assign tmp7 22) (seq (assign tmp3 (+ tmp4 tmp7)) (return tmp3)))))) |}]
 
 let%expect_test "Example 6 uncover locals" =
-  let module M = Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty))) in
+  let module M =
+    Ex6 (ExplicateControl (R1_Pretty) (UncoverLocals (C0_Pretty)) ()) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
-    {| Ex6: (program ((locals . (tmp10 tmp7 tmp9))) ((start . (seq (assign tmp9 22) (seq (assign tmp7 20) (seq (assign tmp10 (+ tmp7 tmp9)) (return tmp10)))))) |}]
+    {| Ex6: (program ((locals . (tmp12 tmp8 tmp9))) ((start . (seq (assign tmp9 20) (seq (assign tmp12 22) (seq (assign tmp8 (+ tmp9 tmp12)) (return tmp8)))))) |}]
 
 let%expect_test "Example 6 select instructions" =
   let module M =
     Ex6
       (ExplicateControl
          (R1_Pretty)
-         (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))) in
+         (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))
+         ()) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
     Ex6: (program () (start . (block ()
-    (movq (int 22) (var tmp13))
-    (movq (int 20) (var tmp11))
-    (movq (var tmp11) (var tmp14))
-    (addq (var tmp13) (var tmp14))
-    (movq (var tmp14) (reg rax))
+    (movq (int 20) (var tmp14))
+    (movq (int 22) (var tmp17))
+    (movq (var tmp14) (var tmp13))
+    (addq (var tmp17) (var tmp13))
+    (movq (var tmp13) (reg rax))
     (retq))))
     |}]
 
@@ -569,15 +515,16 @@ let%expect_test "Example 6 assign homes" =
       (ExplicateControl
          (R1_Pretty)
          (SelectInstructions
-            (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))) in
+            (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))
+         ()) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
     Ex6: (program ((stack_size . 24)) (start . (block ()
-    (movq (int 22) (deref rbp -8))
-    (movq (int 20) (deref rbp -16))
-    (movq (deref rbp -16) (deref rbp -24))
-    (addq (deref rbp -8) (deref rbp -24))
+    (movq (int 20) (deref rbp -8))
+    (movq (int 22) (deref rbp -16))
+    (movq (deref rbp -8) (deref rbp -24))
+    (addq (deref rbp -16) (deref rbp -24))
     (movq (deref rbp -24) (reg rax))
     (retq))))
     |}]
@@ -590,16 +537,17 @@ let%expect_test "Example 6 patch instructions" =
          (SelectInstructions
             (UncoverLocals
                (C0_Pretty))
-               (AssignHomes (PatchInstructions (X86_0_Pretty))))) in
+               (AssignHomes (PatchInstructions (X86_0_Pretty))))
+         ()) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
     Ex6: (program ((stack_size . 24)) (start . (block ()
-    (movq (int 22) (deref rbp -8))
-    (movq (int 20) (deref rbp -16))
-    (movq (deref rbp -16) (reg rax))
-    (movq (reg rax) (deref rbp -24))
+    (movq (int 20) (deref rbp -8))
+    (movq (int 22) (deref rbp -16))
     (movq (deref rbp -8) (reg rax))
+    (movq (reg rax) (deref rbp -24))
+    (movq (deref rbp -16) (reg rax))
     (addq (reg rax) (deref rbp -24))
     (movq (deref rbp -24) (reg rax))
     (retq))))
@@ -613,7 +561,8 @@ let%expect_test "Example 6 final printed X86" =
          (SelectInstructions
             (UncoverLocals
                (C0_Pretty))
-               (AssignHomes (PatchInstructions (X86_0_Printer))))) in
+               (AssignHomes (PatchInstructions (X86_0_Printer))))
+         ()) in
   Format.printf "%s\n" M.res;
   [%expect
     {|
@@ -624,11 +573,11 @@ let%expect_test "Example 6 final printed X86" =
       subq $24, %rsp
     start:
 
-      movq $22, -8(%rbp)
-      movq $20, -16(%rbp)
-      movq -16(%rbp), %rax
-      movq %rax, -24(%rbp)
+      movq $20, -8(%rbp)
+      movq $22, -16(%rbp)
       movq -8(%rbp), %rax
+      movq %rax, -24(%rbp)
+      movq -16(%rbp), %rax
       addq %rax, -24(%rbp)
       movq -24(%rbp), %rax
       addq $24, %rsp

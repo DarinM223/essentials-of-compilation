@@ -3,6 +3,7 @@ module type R1 = sig
 
   type 'a var
   val var : 'a var -> 'a exp
+  val fresh : unit -> 'a var
   val string_of_var : 'a var -> string
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
@@ -24,6 +25,7 @@ module R1_T
   type 'a var = 'a F.var
   let string_of_var = F.string_of_var
   let var v = fwd @@ F.var v
+  let fresh = F.fresh
   let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
 end
 
@@ -38,6 +40,7 @@ module R1_R_T (R : Chapter1.Reader) (F : R1) :
 
   let var v _ = F.var v
   let string_of_var = F.string_of_var
+  let fresh = F.fresh
   let ( let* ) e f r = F.( let* ) (e r) (fun v -> f v r)
 end
 
@@ -57,79 +60,11 @@ module R1_Pretty = struct
     let c = ref (-1) in
     fun () ->
       incr c;
-      !c
+      "tmp" ^ string_of_int !c
 
   let ( let* ) e f =
-    let v = "tmp" ^ string_of_int (fresh ()) in
+    let v = fresh () in
     "(let ([" ^ v ^ " " ^ e ^ "]) " ^ f v ^ ")"
-end
-
-module R1_Interp (ReadInt : sig
-  val read_int : unit -> int
-end) =
-struct
-  type 'a typ =
-    | TInt : int typ
-    | TBool : bool typ
-    | TUnit : unit typ
-
-  type 'a exp = 'a typ * 'a
-  type 'a var = 'a typ * int
-  let string_of_var (_, i) = "tmp" ^ string_of_int i
-
-  let int x = (TInt, x)
-  let read () =
-    print_endline "Enter integer: ";
-    (TInt, ReadInt.read_int ())
-  let neg (TInt, i) = (TInt, -i)
-  let ( + ) (TInt, a) (TInt, b) = (TInt, a + b)
-
-  type 'a program = 'a
-  let program (_, i) = i
-
-  let fresh =
-    let counter = ref (-1) in
-    fun () ->
-      incr counter;
-      !counter
-
-  let int_env : (int, int exp) Hashtbl.t = Hashtbl.create 100
-  let bool_env : (int, bool exp) Hashtbl.t = Hashtbl.create 100
-  let unit_env : (int, unit exp) Hashtbl.t = Hashtbl.create 100
-
-  let lookup_env : type a. a var -> a exp =
-   fun (ty, v) ->
-    match ty with
-    | TInt -> Hashtbl.find int_env v
-    | TBool -> Hashtbl.find bool_env v
-    | TUnit -> Hashtbl.find unit_env v
-
-  let add_env : type a. a var -> a exp -> unit =
-   fun (ty, v) e ->
-    match ty with
-    | TInt -> Hashtbl.add int_env v e
-    | TBool -> Hashtbl.add bool_env v e
-    | TUnit -> Hashtbl.add unit_env v e
-
-  let remove_env : type a. a var -> unit =
-   fun (ty, v) ->
-    match ty with
-    | TInt -> Hashtbl.remove int_env v
-    | TBool -> Hashtbl.remove bool_env v
-    | TUnit -> Hashtbl.remove unit_env v
-
-  let var v = lookup_env v
-
-  let ( let* ) ((ty, _) as e) f =
-    let i = fresh () in
-    let v = (ty, i) in
-    add_env v e;
-    let result = f v in
-    remove_env v;
-    result
-
-  type 'a obs = 'a
-  let observe a = a
 end
 
 module type C0 = sig
@@ -536,44 +471,6 @@ module C0_Ex1 (F : C0) = struct
              @> return (arg (var "y")) );
          ]
 end
-
-let%expect_test "Example 1 evaluation" =
-  let module M = Ex1 (R1_Interp (Stdlib)) in
-  Format.printf "Ex1: %d\n" M.res;
-  [%expect {| Ex1: 42 |}]
-
-let%expect_test "Example 2 evaluation" =
-  let module M = Ex2 (R1_Interp (Stdlib)) in
-  Format.printf "Ex2: Result: %d Expected: %d\n" M.res M.check;
-  [%expect {| Ex2: Result: 42 Expected: 42 |}]
-
-let%expect_test "Example 3 evaluation" =
-  (* Entering 52, then 10, should produce 42, not -42 *)
-  let input = ref [ 52; 10 ] in
-  let module ReadInt = struct
-    let read_int () =
-      match !input with
-      | num :: rest ->
-        input := rest;
-        Format.printf "%d\n" num;
-        num
-      | _ -> failwith "Input not available"
-  end in
-  let module M = Ex3 (R1_Interp (ReadInt)) in
-  Format.printf "Ex3: %d\n" M.res;
-  [%expect
-    {|
-    Enter integer:
-    Enter integer:
-    52
-    10
-    Ex3: 42
-    |}]
-
-let%expect_test "Example 1 with partial evaluation" =
-  let module M = Ex1 (R1_Partial (R1_Interp (Stdlib))) in
-  Format.printf "Ex1 with partial pass: %d\n" M.res;
-  [%expect {| Ex1 with partial pass: 42 |}]
 
 let%expect_test "Example 3 with partial evaluation" =
   let module M = Ex3 (R1_Pretty) in

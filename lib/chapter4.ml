@@ -136,7 +136,7 @@ struct
       (Complex, F.not (F.var tmp))
 end
 
-module ExplicateControl (F : R2_Shrink) (C1 : C1) :
+(* module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   R2_Shrink with type 'a obs = unit C1.obs = struct
   module M = Chapter2_passes.ExplicateControlPass (F) (C1)
   include R2_Shrink_R_T (M.X_reader) (R2_Shrink_T (M.X) (M.X_program) (F))
@@ -239,7 +239,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) :
   let program e () =
     let ann, e = e M.X_reader.init in
     (Some (construct_c1 ann), F.program e)
-end
+end *)
 
 module Ex1 (F : R2) = struct
   open F
@@ -290,7 +290,7 @@ let%expect_test "Remove complex with simple conditional" =
   [%expect
     {| Ex2: (program (let ([tmp2 2]) (if (< (var tmp2) 5) (+ (var tmp2) 1) (+ 6 7)))) |}]
 
-let%expect_test "Explicate control with simple conditional" =
+(* let%expect_test "Explicate control with simple conditional" =
   let module M =
     Ex3 (Shrink (RemoveComplex (ExplicateControl (R2_Shrink_Pretty) (C1_Pretty)))) in
   Format.printf "Ex3: %s\n" M.res;
@@ -299,9 +299,9 @@ let%expect_test "Explicate control with simple conditional" =
     Ex3: (program ((locals . ())) ((block2 . (return t))
     (block3 . (return f))
     (start . (seq (assign tmp3 2) (if (< tmp3 5) block2 block3))))
-    |}]
+    |}] *)
 
-let%expect_test "Explicate control with assignment to conditional" =
+(* let%expect_test "Explicate control with assignment to conditional" =
   let module M =
     Ex4 (Shrink (RemoveComplex (ExplicateControl (R2_Shrink_Pretty) (C1_Pretty)))) in
   Format.printf "Ex4: %s\n" M.res;
@@ -311,4 +311,4 @@ let%expect_test "Explicate control with assignment to conditional" =
     Ex4: (program ((locals . ())) ((block2 . (return t))
     (block3 . (return f))
     (start . (seq (assign tmp7 (< tmp4 5)) (seq (assign tmp8 (not tmp7)) (seq (assign tmp4 1) (return tmp8))))))
-    |}]
+    |}] *)

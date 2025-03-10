@@ -4,4 +4,4 @@
  (preprocess
   (pps ppx_deriving.std ppx_hash ppx_expect))
  (flags
-  (:standard -w -57+71)))
+  (:standard -w -57+71-37)))
