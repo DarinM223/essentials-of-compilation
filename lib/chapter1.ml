@@ -59,7 +59,7 @@ end
 
 module type Reader = sig
   type t
-  val init : t (* Initial state *)
+  val init : unit -> t (* Initial state *)
 end
 
 module R0_R_T (R : Reader) (F : R0) :
@@ -74,7 +74,7 @@ module R0_R_T (R : Reader) (F : R0) :
   let read () _ = F.read ()
   let neg e r = F.neg (e r)
   let ( + ) a b r = F.(a r + b r)
-  let program e () = F.program (e R.init)
+  let program e () = F.program (e (R.init ()))
 
   type 'a obs = 'a F.obs
   let observe a = F.observe (a ())

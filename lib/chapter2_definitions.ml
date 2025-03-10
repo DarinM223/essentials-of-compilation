@@ -284,6 +284,53 @@ struct
   let r15 = X_reg.fwd F.r15
 end
 
+module X86_0_R_T (R : Chapter1.Reader) (F : X86_0) :
+  X86_0
+    with type 'a reg = R.t -> 'a F.reg
+     and type 'a arg = R.t -> 'a F.arg
+     and type 'a instr = R.t -> 'a F.instr
+     and type 'a block = R.t -> 'a F.block
+     and type 'a program = unit -> 'a F.program
+     and type label = F.label
+     and type 'a obs = 'a F.obs = struct
+  type 'a reg = R.t -> 'a F.reg
+  type 'a arg = R.t -> 'a F.arg
+  type 'a instr = R.t -> 'a F.instr
+  type 'a block = R.t -> 'a F.block
+  type 'a program = unit -> 'a F.program
+  type label = F.label
+  include
+    X86_0_Reg_T
+      (struct
+        type 'a from = 'a F.reg
+        type 'a term = 'a reg
+        let fwd r = fun _ -> r
+        let bwd _ = failwith ""
+      end)
+      (F)
+  let reg r ctx = F.reg (r ctx)
+  let deref r i ctx = F.deref (r ctx) i
+  let int i _ = F.int i
+  let var v _ = F.var v
+  let addq a b ctx = F.addq (a ctx) (b ctx)
+  let subq a b ctx = F.subq (a ctx) (b ctx)
+  let movq a b ctx = F.movq (a ctx) (b ctx)
+  let retq _ = F.retq
+  let negq a ctx = F.negq (a ctx)
+  let callq l _ = F.callq l
+  let pushq a ctx = F.pushq (a ctx)
+  let popq a ctx = F.popq (a ctx)
+  let block ?live_after instrs ctx =
+    F.block ?live_after (List.map (fun f -> f ctx) instrs)
+  let program ?stack_size ?conflicts ?moves blocks () =
+    let init = R.init () in
+    F.program ?stack_size ?conflicts ?moves
+      (List.map (fun (l, b) -> (l, b init)) blocks)
+
+  type 'a obs = 'a F.obs
+  let observe p = F.observe (p ())
+end
+
 module X86_0_T
     (X_reg : Chapter1.TRANS)
     (X_arg : Chapter1.TRANS)

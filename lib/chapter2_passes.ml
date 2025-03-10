@@ -232,54 +232,41 @@ module SelectInstructions (F : C0) (X86 : X86_0) :
   let observe = X86.observe
 end
 
+module AssignHomesPass (X86 : X86_0) = struct
+  module X_reader = struct
+    type t = {
+      stack_size : unit -> int;
+      get_stack_slot : string -> int;
+    }
+
+    let init () =
+      let stack_size = ref 0 in
+      let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
+      let get_stack_slot (v : string) : int =
+        match Hashtbl.find_opt var_table v with
+        | Some slot -> slot
+        | None ->
+          stack_size := !stack_size + 8;
+          let slot = - !stack_size in
+          Hashtbl.add var_table v slot;
+          slot
+      in
+      { stack_size = (fun () -> !stack_size); get_stack_slot }
+  end
+  module IDelta = struct
+    open X_reader
+    let var v ctx = X86.(deref rbp (ctx.get_stack_slot v))
+    let program ?stack_size:_ ?conflicts ?moves blocks () =
+      let init = init () in
+      X86.program ~stack_size:(init.stack_size ()) ?conflicts ?moves
+        (List.map (fun (l, b) -> (l, b init)) blocks)
+  end
+end
+
 module AssignHomes (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs = struct
-  type 'a reg = 'a X86.reg
-  type 'a arg = (string -> int) -> 'a X86.arg
-  type 'a instr = (string -> int) -> 'a X86.instr
-  type 'a block = (string -> int) -> 'a X86.block
-  type 'a program = 'a X86.program
-  type label = X86.label
-
-  module X_reg = Chapter1.MkId (struct
-    type 'a t = 'a reg
-  end)
-
-  include X86_0_Reg_T (X_reg) (X86)
-
-  let reg v _ = X86.reg v
-  let var v f = X86.(deref rbp (f v))
-  let int v _ = X86.int v
-  let deref r i _ = X86.deref r i
-
-  let addq a b f = X86.addq (a f) (b f)
-  let subq a b f = X86.subq (a f) (b f)
-  let movq a b f = X86.movq (a f) (b f)
-  let negq a f = X86.negq (a f)
-  let pushq a f = X86.pushq (a f)
-  let popq a f = X86.popq (a f)
-  let retq _ = X86.retq
-  let callq l _ = X86.callq l
-
-  let block ?live_after instrs f =
-    X86.block ?live_after @@ List.map (fun i -> i f) instrs
-
-  let program ?stack_size:_ ?conflicts ?moves blocks =
-    let stack_size = ref 0 in
-    let var_table : (string, int) Hashtbl.t = Hashtbl.create 100 in
-    let get_stack_slot (v : string) : int =
-      match Hashtbl.find_opt var_table v with
-      | Some slot -> slot
-      | None ->
-        stack_size := !stack_size + 8;
-        let slot = - !stack_size in
-        Hashtbl.add var_table v slot;
-        slot
-    in
-    let blocks = List.map (fun (l, b) -> (l, b get_stack_slot)) blocks in
-    X86.program ~stack_size:!stack_size ?conflicts ?moves blocks
-
-  type 'a obs = 'a X86.obs
-  let observe = X86.observe
+  module M = AssignHomesPass (X86)
+  include X86_0_R_T (M.X_reader) (X86)
+  include M.IDelta
 end
 
 module PatchInstructionsPass (X86 : X86_0) = struct
