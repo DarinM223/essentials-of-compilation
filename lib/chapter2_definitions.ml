@@ -50,7 +50,7 @@ module R1_Partial (F : R1) : R1 with type 'a obs = 'a F.program = struct
   include M.IDelta
 end
 
-module R1_Pretty = struct
+module R1_Pretty () = struct
   include Chapter1.R0_Pretty
   type 'a var = string
   let string_of_var v = v
@@ -473,7 +473,7 @@ module C0_Ex1 (F : C0) = struct
 end
 
 let%expect_test "Example 3 with partial evaluation" =
-  let module M = Ex3 (R1_Pretty) in
+  let module M = Ex3 (R1_Pretty ()) in
   Format.printf "Ex3 pretty: %s\n" M.res;
   [%expect
     {| Ex3 pretty: (program (let ([tmp0 (read)]) (let ([tmp1 (read)]) (+ (var tmp0) (- (var tmp1)))))) |}]

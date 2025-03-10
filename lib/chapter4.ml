@@ -50,8 +50,8 @@ module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
   let if_ a b c r = F.if_ (a r) (b r) (c r)
 end
 
-module R2_Shrink_Pretty = struct
-  include Chapter2_definitions.R1_Pretty
+module R2_Shrink_Pretty () = struct
+  include Chapter2_definitions.R1_Pretty ()
   let t = "t"
   let f = "f"
   let not a = "(not " ^ a ^ ")"
@@ -279,16 +279,16 @@ module Ex4 (F : R2) = struct
 end
 
 let%expect_test "Example 1 shrink" =
-  let module M = Ex1 (Shrink (R2_Shrink_Pretty)) in
+  let module M = Ex1 (Shrink (R2_Shrink_Pretty ())) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {| Ex1: (program (let ([tmp0 2]) (let ([tmp1 (read)]) (if (if (not (< 5 (var tmp0))) (< (var tmp0) (var tmp1)) f) (+ (var tmp1) (- (var tmp0))) (+ (var tmp1) (var tmp0)))))) |}]
 
 let%expect_test "Remove complex with simple conditional" =
-  let module M = Ex2 (Shrink (RemoveComplex (R2_Shrink_Pretty))) in
+  let module M = Ex2 (Shrink (RemoveComplex (R2_Shrink_Pretty ()))) in
   Format.printf "Ex2: %s\n" M.res;
   [%expect
-    {| Ex2: (program (let ([tmp2 2]) (if (< (var tmp2) 5) (+ (var tmp2) 1) (+ 6 7)))) |}]
+    {| Ex2: (program (let ([tmp0 2]) (if (< (var tmp0) 5) (+ (var tmp0) 1) (+ 6 7)))) |}]
 
 (* let%expect_test "Explicate control with simple conditional" =
   let module M =
