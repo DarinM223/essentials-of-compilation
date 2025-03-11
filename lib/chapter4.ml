@@ -136,110 +136,91 @@ struct
       (Complex, F.not (F.var tmp))
 end
 
-(* module ExplicateControl (F : R2_Shrink) (C1 : C1) :
+module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
   R2_Shrink with type 'a obs = unit C1.obs = struct
-  module M = Chapter2_passes.ExplicateControlPass (F) (C1)
-  include R2_Shrink_R_T (M.X_reader) (R2_Shrink_T (M.X) (M.X_program) (F))
-  include M.IDelta
-  open M.X
-  open Chapter2_definitions
-  let t _ = ({ empty_ann with result = Arg C1.t }, F.t)
-  let f _ = ({ empty_ann with result = Arg C1.f }, F.f)
-  let not e r =
-    let ann, e = e r in
-    match ann with
-    | { result = If (update, cond, t, f); _ } ->
-      (* Swap the false and true block bodies *)
-      let blocks =
-        ann.blocks
-        |> StringMap.update t (fun _ -> StringMap.find_opt f ann.blocks)
-        |> StringMap.update f (fun _ -> StringMap.find_opt t ann.blocks)
-      in
-      ( { ann with blocks; result = If ((fun t f -> update f t), cond, t, f) },
-        F.not e )
-    | { result = Arg a; _ } -> ({ ann with result = Exp (C1.not a) }, F.not e)
-    | _ -> ({ ann with result = Unk }, F.not e)
+  include Chapter2_passes.ExplicateControl (F) (C1) ()
 
-  let fresh =
+  let block_map : (string, unit C1.tail) Hashtbl.t = Hashtbl.create 100
+  let fresh_block =
     let c = ref (-1) in
-    fun () ->
+    fun block_name ->
       incr c;
-      !c
+      block_name ^ string_of_int !c
+  let insert_block block_name body =
+    let label = fresh_block block_name in
+    Hashtbl.add block_map label body;
+    label
+  let convert_cond e = function
+    | Tail -> C1.return e
+    | Assign (v, body) -> C1.(assign v e @> body ())
+    | Pred (t, f) ->
+      let t_label = insert_block "t" (t ()) in
+      let f_label = insert_block "f" (f ()) in
+      C1.if_ e t_label f_label
 
-  let add_ann_block ?label ann blocks =
-    let to_stmt = function
-      | Arg a -> C1.(return (arg a))
-      | Exp e -> C1.return e
-      | If (_update, cond, t, f) -> C1.if_ cond t f
-      | Unk -> failwith "Unknown type"
-    in
-    let tail =
-      match ann.bindings with
-      | [] -> to_stmt ann.result
-      | _ -> List.fold_right C1.( @> ) ann.bindings (to_stmt ann.result)
-    in
-    let new_block_label =
-      match label with
-      | Some label -> label
-      | None -> "block" ^ string_of_int (fresh ())
-    in
-    (new_block_label, StringMap.add new_block_label tail blocks)
+  let t = function
+    | Tail -> C1.(return (arg t))
+    | Assign (v, body) -> C1.(assign v (arg t) @> body ())
+    | Pred (t, _) -> t ()
+  let f = function
+    | Tail -> C1.(return (arg f))
+    | Assign (v, body) -> C1.(assign v (arg f) @> body ())
+    | Pred (_, f) -> f ()
+  let not e = function
+    | Tail ->
+      let tmp = F.(string_of_var (fresh ())) in
+      e (Assign (tmp, fun () -> C1.(return (not (var (lookup tmp))))))
+    | Assign (v, body) ->
+      let tmp = F.(string_of_var (fresh ())) in
+      e
+        (Assign
+           (tmp, fun () -> C1.(assign v (not (var (lookup tmp))) @> body ())))
+    | Pred (t, f) -> e (Pred (f, t))
+  let ( = ) a b r =
+    let tmp1 = F.(string_of_var (fresh ())) in
+    let tmp2 = F.(string_of_var (fresh ())) in
+    a
+      (Assign
+         ( tmp1,
+           fun () ->
+             b
+               (Assign (tmp2, fun () -> convert_cond C1.(var tmp1 = var tmp2) r))
+         ))
+  let ( < ) a b r =
+    let tmp1 = F.(string_of_var (fresh ())) in
+    let tmp2 = F.(string_of_var (fresh ())) in
+    a
+      (Assign
+         ( tmp1,
+           fun () ->
+             b
+               (Assign (tmp2, fun () -> convert_cond C1.(var tmp1 < var tmp2) r))
+         ))
 
-  let handle_cond c1_cond r2_cond e1 e2 r =
-    let ann1, e1 = e1 r in
-    let ann2, e2 = e2 r in
-    let merged = merge ann1 ann2 in
-    match (ann1, ann2) with
-    | { result = Arg a1; _ }, { result = Arg a2; _ } ->
-      let t_label = "block" ^ string_of_int (fresh ()) in
-      let f_label = "block" ^ string_of_int (fresh ()) in
-      let blocks =
-        merged.blocks
-        |> StringMap.add t_label C1.(return (arg t))
-        |> StringMap.add f_label C1.(return (arg f))
+  let if_ cond t_branch f_branch = function
+    | Tail ->
+      let t_label = insert_block "t" @@ t_branch Tail in
+      let f_label = insert_block "f" @@ f_branch Tail in
+      cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
+    | Assign (v, body) ->
+      let body_label = insert_block "body" @@ body () in
+      let t_label =
+        insert_block "t" @@ t_branch @@ Assign (v, fun () -> C1.goto body_label)
       in
-      let update t f blocks =
-        blocks
-        |> StringMap.update t_label (fun _ -> Some (C1.goto t))
-        |> StringMap.update f_label (fun _ -> Some (C1.goto f))
+      let f_label =
+        insert_block "f" @@ f_branch @@ Assign (v, fun () -> C1.goto body_label)
       in
-      let cond = c1_cond a1 a2 in
-      ( { merged with blocks; result = If (update, cond, t_label, f_label) },
-        r2_cond e1 e2 )
-    | _ -> (merged, r2_cond e1 e2)
-
-  let ( = ) = handle_cond C1.( = ) F.( = )
-  let ( < ) = handle_cond C1.( < ) F.( < )
-
-  let if_ cond th els r =
-    let ann1, cond = cond r in
-    let ann2, th = th r in
-    let ann3, els = els r in
-    let blocks = ann1.blocks in
-    let then_label, blocks = add_ann_block ann2 blocks in
-    let else_label, blocks = add_ann_block ann3 blocks in
-    (* if ann2 or ann3 are not IF, then call conditional's update function *)
-    let cond_exp =
-      match ann1.result with
-      | If (_, cond_exp, _, _) -> cond_exp
-      | _ -> failwith "Expected conditional to have conditional result"
-    in
-    let update = failwith "" in
-    ( {
-        ann1 with
-        blocks;
-        result = If (update, cond_exp, then_label, else_label);
-      },
-      F.if_ cond th els )
-
-  let construct_c1 ann =
-    let _, blocks = add_ann_block ~label:"start" ann ann.blocks in
-    C1.(program (info []) (StringMap.to_list blocks))
+      cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
+    | Pred (t, f) ->
+      cond
+        (Pred
+           ((fun () -> t_branch (Pred (t, f))), fun () -> f_branch (Pred (t, f))))
 
   let program e () =
-    let ann, e = e M.X_reader.init in
-    (Some (construct_c1 ann), F.program e)
-end *)
+    let start_body = e Tail in
+    let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
+    C1.(program (info [])) (("start", start_body) :: blocks)
+end
 
 module Ex1 (F : R2) = struct
   open F

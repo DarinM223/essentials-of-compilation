@@ -53,12 +53,11 @@ module RemoveComplex (F : R1) : R1 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module ExplicateControl (F : R1) (C0 : C0) () :
-  R1 with type 'a obs = unit C0.obs = struct
+module ExplicateControl (F : R1) (C0 : C0) () = struct
   type ctx =
     | Tail
     | Assign of string * (unit -> unit C0.tail)
-    | Pred of unit C0.tail * unit C0.tail
+    | Pred of (unit -> unit C0.tail) * (unit -> unit C0.tail)
   type 'a exp = ctx -> unit C0.tail
   type 'a program = unit -> unit C0.program
   type 'a var = 'a F.var
