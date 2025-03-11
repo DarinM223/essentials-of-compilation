@@ -110,6 +110,10 @@ module GraphUtils = struct
     in
     ArgSet.fold go (neighbors graph v) IntSet.empty
 
+  let rec remove_list a = function
+    | [] -> []
+    | e :: es -> if a = e then es else e :: remove_list a es
+
   let color_graph moves graph vars =
     let color_table = ArgTable.create (List.length vars) in
     let module Elem = struct
@@ -124,8 +128,8 @@ module GraphUtils = struct
     end in
     let module Worklist = Set.Make (Elem) in
     let rec go worklist =
-      if not (Worklist.is_empty worklist) then begin
-        let u = Worklist.max_elt worklist in
+      if not (List.is_empty worklist) then begin
+        let u = Worklist.(max_elt (of_list worklist)) in
         let adjacent_colors = saturation color_table graph u in
         let rec find_color color =
           if IntSet.mem color adjacent_colors then
@@ -145,10 +149,10 @@ module GraphUtils = struct
             IntSet.min_elt biased_colors
         in
         ArgTable.add color_table u c;
-        go (Worklist.remove u worklist)
+        go (remove_list u worklist)
       end
     in
-    go (Worklist.of_list vars);
+    go vars;
     ArgMap.of_seq @@ ArgTable.to_seq color_table
 end
 
@@ -323,94 +327,73 @@ module BuildMoves (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
+module AllocateRegistersPass (X86 : X86_0) = struct
+  module X_reader = struct
+    type t = unit
+    let init () = ()
+  end
+
+  module IDelta = struct
+    type _ eff += Rename : string -> 'a X86.arg eff
+    let var v _ = Effect.perform (Rename v)
+
+    let program ?stack_size:_ ?(conflicts = ArgMap.empty)
+        ?(moves = ArgMap.empty) blocks () =
+      let stack_size = ref 0 in
+      let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
+      (* Remove rax from the interference graph *)
+      let rax = Arg.Reg (Hashtbl.hash X86.rax) in
+      let conflicts =
+        conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
+      in
+      let vars =
+        conflicts |> ArgMap.bindings |> List.map (fun (key, _) -> key)
+      in
+      let colors = GraphUtils.color_graph moves conflicts vars in
+      let get_arg v =
+        let color =
+          match ArgMap.find_opt (Arg.Var v) colors with
+          | Some color -> color
+          | None -> failwith @@ "Invalid variable: " ^ v ^ " not in colors map"
+        in
+        match color with
+        | 0 -> X86.(reg rbx)
+        | 1 -> X86.(reg rcx)
+        | 2 -> X86.(reg rdx)
+        | 3 -> X86.(reg rsi)
+        | 4 -> X86.(reg rdi)
+        | 5 -> X86.(reg r8)
+        | 6 -> X86.(reg r9)
+        | 7 -> X86.(reg r10)
+        | 8 -> X86.(reg r11)
+        | 9 -> X86.(reg r12)
+        | 10 -> X86.(reg r13)
+        | 11 -> X86.(reg r14)
+        | 12 -> X86.(reg r15)
+        | c ->
+          let slot =
+            try Hashtbl.find color_slot_table c
+            with Not_found ->
+              stack_size := !stack_size + 8;
+              let slot = - !stack_size in
+              Hashtbl.add color_slot_table c slot;
+              slot
+          in
+          X86.(deref rbp slot)
+      in
+      let blocks =
+        try List.map (fun (l, b) -> (l, b ())) blocks
+        with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
+      in
+      X86.program ~stack_size:!stack_size ~conflicts ~moves blocks
+  end
+end
+
 module AllocateRegisters (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs =
 struct
-  type 'a reg = 'a X86.reg
-
-  type color_result =
-    | Stack_slot of int
-    | Int_register of int reg
-
-  let arg_of_color_result = function
-    | Stack_slot slot -> X86.(deref rbp slot)
-    | Int_register reg -> X86.reg reg
-
-  type 'a arg = (string -> color_result) -> 'a X86.arg
-  type 'a instr = (string -> color_result) -> 'a X86.instr
-  type 'a block = (string -> color_result) -> 'a X86.block
-  type 'a program = 'a X86.program
-  type label = X86.label
-
-  module X_reg = Chapter1.MkId (struct
-    type 'a t = 'a reg
-  end)
-
-  include X86_0_Reg_T (X_reg) (X86)
-
-  let reg v _ = X86.reg v
-  let var v f = arg_of_color_result (f v)
-  let int v _ = X86.int v
-  let deref r i _ = X86.deref r i
-
-  let addq a b f = X86.addq (a f) (b f)
-  let subq a b f = X86.subq (a f) (b f)
-  let movq a b f = X86.movq (a f) (b f)
-  let negq a f = X86.negq (a f)
-  let pushq a f = X86.pushq (a f)
-  let popq a f = X86.popq (a f)
-  let retq _ = X86.retq
-  let callq l _ = X86.callq l
-
-  let block ?live_after instrs f =
-    X86.block ?live_after @@ List.map (fun i -> i f) instrs
-
-  let program ?stack_size:_ ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty)
-      blocks =
-    let stack_size = ref 0 in
-    let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
-    (* Remove rax from the interference graph *)
-    let rax = Arg.Reg (Hashtbl.hash X86.rax) in
-    let conflicts =
-      conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
-    in
-    let vars = conflicts |> ArgMap.bindings |> List.map (fun (key, _) -> key) in
-    let colors = GraphUtils.color_graph moves conflicts vars in
-    let get_arg (v : string) : color_result =
-      let color =
-        match ArgMap.find_opt (Arg.Var v) colors with
-        | Some color -> color
-        | None -> failwith @@ "Invalid variable: " ^ v ^ " not in colors map"
-      in
-      match color with
-      | 0 -> Int_register X86.rbx
-      | 1 -> Int_register X86.rcx
-      | 2 -> Int_register X86.rdx
-      | 3 -> Int_register X86.rsi
-      | 4 -> Int_register X86.rdi
-      | 5 -> Int_register X86.r8
-      | 6 -> Int_register X86.r9
-      | 7 -> Int_register X86.r10
-      | 8 -> Int_register X86.r11
-      | 9 -> Int_register X86.r12
-      | 10 -> Int_register X86.r13
-      | 11 -> Int_register X86.r14
-      | 12 -> Int_register X86.r15
-      | c ->
-        let slot =
-          try Hashtbl.find color_slot_table c
-          with Not_found ->
-            stack_size := !stack_size + 8;
-            let slot = - !stack_size in
-            Hashtbl.add color_slot_table c slot;
-            slot
-        in
-        Stack_slot slot
-    in
-    let blocks = List.map (fun (l, b) -> (l, b get_arg)) blocks in
-    X86.program ~stack_size:!stack_size ~conflicts ~moves blocks
-
-  type 'a obs = 'a X86.obs
-  let observe = X86.observe
+  module M = AllocateRegistersPass (X86)
+  include Chapter2_definitions.X86_0_R_T (M.X_reader) (X86)
+  include M.IDelta
 end
 
 module Ex1 (F : X86_0) = struct
