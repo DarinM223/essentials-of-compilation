@@ -127,18 +127,12 @@ struct
   module M = Chapter2_passes.RemoveComplexPass (F)
   include R2_Shrink_T (M.X) (M.X_program) (F)
   include M.IDelta
-  let not (ann, e) =
-    let open M.X in
-    match ann with
-    | Simple -> (Complex, F.not e)
-    | Complex ->
-      let* tmp = (ann, e) in
-      (Complex, F.not (F.var tmp))
 end
 
 module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
   R2_Shrink with type 'a obs = unit C1.obs = struct
-  include Chapter2_passes.ExplicateControl (F) (C1) ()
+  module M = Chapter2_passes.ExplicateControl (F) (C1) ()
+  include M
 
   let block_map : (string, unit C1.tail) Hashtbl.t = Hashtbl.create 100
   let fresh_block =
@@ -154,9 +148,14 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
     | Tail -> C1.return e
     | Assign (v, body) -> C1.(assign v e @> body ())
     | Pred (t, f) ->
-      let t_label = insert_block "t" (t ()) in
-      let f_label = insert_block "f" (f ()) in
+      let t_label = insert_block "block_t" (t ()) in
+      let f_label = insert_block "block_f" (f ()) in
       C1.if_ e t_label f_label
+
+  let var v = function
+    | Pred (t, f) ->
+      convert_cond C1.(arg (var (F.string_of_var v))) (Pred (t, f))
+    | r -> M.var v r
 
   let t = function
     | Tail -> C1.(return (arg t))
@@ -184,8 +183,11 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
          ( tmp1,
            fun () ->
              b
-               (Assign (tmp2, fun () -> convert_cond C1.(var tmp1 = var tmp2) r))
-         ))
+               (Assign
+                  ( tmp2,
+                    fun () ->
+                      convert_cond C1.(var (lookup tmp1) = var (lookup tmp2)) r
+                  )) ))
   let ( < ) a b r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in
@@ -194,21 +196,26 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
          ( tmp1,
            fun () ->
              b
-               (Assign (tmp2, fun () -> convert_cond C1.(var tmp1 < var tmp2) r))
-         ))
+               (Assign
+                  ( tmp2,
+                    fun () ->
+                      convert_cond C1.(var (lookup tmp1) < var (lookup tmp2)) r
+                  )) ))
 
   let if_ cond t_branch f_branch = function
     | Tail ->
-      let t_label = insert_block "t" @@ t_branch Tail in
-      let f_label = insert_block "f" @@ f_branch Tail in
+      let t_label = insert_block "block_t" @@ t_branch Tail in
+      let f_label = insert_block "block_f" @@ f_branch Tail in
       cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
     | Assign (v, body) ->
-      let body_label = insert_block "body" @@ body () in
+      let body_label = insert_block "block_body" @@ body () in
       let t_label =
-        insert_block "t" @@ t_branch @@ Assign (v, fun () -> C1.goto body_label)
+        insert_block "block_t" @@ t_branch
+        @@ Assign (v, fun () -> C1.goto body_label)
       in
       let f_label =
-        insert_block "f" @@ f_branch @@ Assign (v, fun () -> C1.goto body_label)
+        insert_block "block_f" @@ f_branch
+        @@ Assign (v, fun () -> C1.goto body_label)
       in
       cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
     | Pred (t, f) ->
@@ -259,6 +266,42 @@ module Ex4 (F : R2) = struct
        var b
 end
 
+module Ex5 (F : R2) = struct
+  open F
+  let res =
+    observe @@ program
+    @@
+    let* a = int 1 in
+    if_
+      (var a < int 5)
+      (let* b = int 5 in
+       let* c = int 6 in
+       var b + var c)
+      (var a + neg (int 1))
+end
+
+module Ex6 (F : R2) = struct
+  open F
+  let res =
+    observe @@ program
+    @@
+    let* a = int 5 in
+    let* b = int 6 in
+    if_
+      (if_
+         (not (var a < int 5))
+         (if_
+            (var b = int 7)
+            (let* c = t in
+             not (var c))
+            (var b = int 6))
+         f)
+      (let* d = int 10 in
+       let* e = var d + neg (int 1) in
+       var e + var d)
+      (if_ (var a < var b) (var a + var b) (var a + neg (var b)))
+end
+
 let%expect_test "Example 1 shrink" =
   let module M = Ex1 (Shrink (R2_Shrink_Pretty ())) in
   Format.printf "Ex1: %s\n" M.res;
@@ -271,25 +314,61 @@ let%expect_test "Remove complex with simple conditional" =
   [%expect
     {| Ex2: (program (let ([tmp0 2]) (if (< (var tmp0) 5) (+ (var tmp0) 1) (+ 6 7)))) |}]
 
-(* let%expect_test "Explicate control with simple conditional" =
+let%expect_test "Explicate control with simple conditional" =
   let module M =
-    Ex3 (Shrink (RemoveComplex (ExplicateControl (R2_Shrink_Pretty) (C1_Pretty)))) in
+    Ex3
+      (Shrink
+         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
   Format.printf "Ex3: %s\n" M.res;
   [%expect
-    {|
-    Ex3: (program ((locals . ())) ((block2 . (return t))
-    (block3 . (return f))
-    (start . (seq (assign tmp3 2) (if (< tmp3 5) block2 block3))))
-    |}] *)
+    {| Ex3: (program ((locals . ())) ((start . (seq (assign tmp0 2) (seq (assign tmp2 5) (return (< tmp0 tmp2)))))) |}]
 
-(* let%expect_test "Explicate control with assignment to conditional" =
+let%expect_test "Explicate control with assignment to conditional" =
   let module M =
-    Ex4 (Shrink (RemoveComplex (ExplicateControl (R2_Shrink_Pretty) (C1_Pretty)))) in
+    Ex4
+      (Shrink
+         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
   Format.printf "Ex4: %s\n" M.res;
-  (* TODO: bindings generated in wrong order. assign tmp4 1 should be the first binding *)
+  [%expect
+    {| Ex4: (program ((locals . ())) ((start . (seq (assign tmp0 1) (seq (assign tmp4 5) (seq (assign tmp2 (< tmp0 tmp4)) (seq (assign tmp1 (not tmp2)) (return tmp1))))))) |}]
+
+let%expect_test "Explicate control with conditional that creates blocks" =
+  let module M =
+    Ex5
+      (Shrink
+         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+  Format.printf "Ex5: %s\n" M.res;
   [%expect
     {|
-    Ex4: (program ((locals . ())) ((block2 . (return t))
-    (block3 . (return f))
-    (start . (seq (assign tmp7 (< tmp4 5)) (seq (assign tmp8 (not tmp7)) (seq (assign tmp4 1) (return tmp8))))))
-    |}] *)
+    Ex5: (program ((locals . ())) ((start . (seq (assign tmp0 1) (seq (assign tmp10 5) (if (< tmp0 tmp10) block_t2 block_f3))))
+    (block_t0 . (seq (assign tmp1 5) (seq (assign tmp2 6) (return (+ tmp1 tmp2)))))
+    (block_f1 . (seq (assign tmp6 1) (seq (assign tmp5 (neg tmp6)) (return (+ tmp0 tmp5)))))
+    (block_t2 . (goto block_t0))
+    (block_f3 . (goto block_f1)))
+    |}]
+
+let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
+  let module M =
+    Ex6
+      (Shrink
+         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+  Format.printf "Ex6: %s\n" M.res;
+  (* TODO: verify that this output is correct *)
+  [%expect
+    {|
+    Ex6: (program ((locals . ())) ((start . (seq (assign tmp0 5) (seq (assign tmp1 6) (seq (assign tmp19 5) (if (< tmp0 tmp19) block_t6 block_f13)))))
+    (block_t3 . (goto block_t1))
+    (block_t0 . (seq (assign tmp2 10) (seq (assign tmp5 1) (seq (assign tmp4 (neg tmp5)) (seq (assign tmp3 (+ tmp2 tmp4)) (return (+ tmp3 tmp2)))))))
+    (block_f5 . (if (< tmp0 tmp1) block_t3 block_f4))
+    (block_t10 . (goto block_t0))
+    (block_f2 . (seq (assign tmp12 (neg tmp1)) (return (+ tmp0 tmp12))))
+    (block_t7 . (goto block_f5))
+    (block_t6 . (goto block_f5))
+    (block_t9 . (seq (assign tmp22 t) (if tmp22 block_t7 block_f8)))
+    (block_f13 . (seq (assign tmp21 7) (if (= tmp1 tmp21) block_t9 block_f12)))
+    (block_f11 . (goto block_f5))
+    (block_t1 . (return (+ tmp0 tmp1)))
+    (block_f12 . (seq (assign tmp24 6) (if (= tmp1 tmp24) block_t10 block_f11)))
+    (block_f4 . (goto block_f2))
+    (block_f8 . (goto block_t0)))
+    |}]
