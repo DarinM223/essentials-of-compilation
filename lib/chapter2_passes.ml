@@ -167,14 +167,13 @@ module UncoverLocals (F : C0) : C0 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module SelectInstructions (F : C0) (X86 : X86_0) :
-  C0 with type 'a obs = unit X86.obs = struct
-  type 'a tagged_arg = string option * 'a X86.arg
-  type 'a tagged_exp =
-    | Arg of 'a tagged_arg
-    | Exp of string * 'a tagged_arg list
-  type 'a arg = 'a tagged_arg
-  type 'a exp = unit X86.instr list * 'a tagged_exp
+module SelectInstructions (F : C0) (X86 : X86_0) = struct
+  type 'a arg = string option * 'a X86.arg
+  type ctx =
+    | Assign of string
+    | Return
+    | If of F.label * F.label
+  type 'a exp = ctx -> unit X86.instr list
   type 'a stmt = unit X86.instr list
   type 'a tail = unit X86.instr list
   type 'a program = unit X86.program
@@ -182,44 +181,39 @@ module SelectInstructions (F : C0) (X86 : X86_0) :
   type info = F.info
   type label = F.label
 
-  let fresh =
-    let c = ref (-1) in
-    fun s ->
-      incr c;
-      s ^ string_of_int !c
-
   let int i = (None, X86.int i)
   let var v = (Some v, X86.var v)
-  let arg a = ([], Arg a)
-  let read () =
-    let lhs = fresh "lhs" in
-    ( X86.[ movq (reg rax) (var lhs); callq "read_int" ],
-      Arg (Some lhs, X86.var lhs) )
-  let neg a = ([], Exp ("neg", [ a ]))
-  let ( + ) a b = ([], Exp ("+", [ a; b ]))
+  let arg (_, arg) = function
+    | Assign v -> X86.[ movq arg (var v) ]
+    | Return -> X86.[ movq arg (reg rax) ]
+    | If _ -> failwith "If not handled for arg for C0"
+  let read () = function
+    | Assign v -> X86.[ movq (reg rax) (var v); callq "read_int" ]
+    | Return -> X86.[ callq "read_int" ]
+    | If _ -> failwith "(read) cannot be a condition of if"
+  let neg (v', arg) = function
+    | Assign v ->
+      if Some v = v' then
+        X86.[ negq (var v) ]
+      else
+        X86.[ negq (var v); movq arg (var v) ]
+    | Return -> X86.[ negq (reg rax); movq arg (reg rax) ]
+    | If _ -> failwith "neg() cannot be a condition of if"
+  let ( + ) (v1, arg1) (v2, arg2) = function
+    | Assign v ->
+      if Some v = v1 then
+        X86.[ addq arg2 (var v) ]
+      else if Some v = v2 then
+        X86.[ addq arg1 (var v) ]
+      else
+        X86.[ addq arg2 (var v); movq arg1 (var v) ]
+    | Return -> X86.[ addq arg2 (reg rax); movq arg1 (reg rax) ]
+    | If _ -> failwith "(+) cannot be a condition of if"
 
-  let assign v (stmts, tag) =
-    match tag with
-    | Exp ("neg", [ (Some v', _) ]) when v = v' -> X86.(negq (var v)) :: stmts
-    | Exp ("neg", [ (_, arg) ]) ->
-      X86.(negq (var v)) :: X86.(movq arg (var v)) :: stmts
-    | Exp ("+", [ (Some v', _); (_, arg) ])
-    | Exp ("+", [ (_, arg); (Some v', _) ])
-      when v = v' ->
-      X86.(addq arg (var v)) :: stmts
-    | Exp ("+", [ (_, arg1); (_, arg2) ]) ->
-      X86.(addq arg2 (var v)) :: X86.(movq arg1 (var v)) :: stmts
-    | Arg (_, a) -> X86.(movq a (var v)) :: stmts
-    | _ -> stmts
+  let assign v e = e (Assign v)
 
-  let return (stmts, tag) =
-    match tag with
-    | Arg (_, a) -> X86.retq :: X86.(movq a (reg rax)) :: stmts
-    | Exp _ ->
-      let v = fresh "v" in
-      let stmts = assign v (stmts, tag) in
-      (* TODO: jump to exit block and mark exit block so that stack can unwind before retq *)
-      X86.retq :: X86.(movq (var v) (reg rax)) :: stmts
+  (* TODO: jump to exit block and mark exit block so that stack can unwind before retq *)
+  let return e = X86.retq :: e Return
 
   let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
   let info = F.info

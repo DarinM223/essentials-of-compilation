@@ -353,7 +353,6 @@ let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
       (Shrink
          (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
   Format.printf "Ex6: %s\n" M.res;
-  (* TODO: verify that this output is correct *)
   [%expect
     {|
     Ex6: (program ((locals . ())) ((start . (seq (assign tmp0 5) (seq (assign tmp1 6) (seq (assign tmp19 5) (if (< tmp0 tmp19) block_t6 block_f13)))))
