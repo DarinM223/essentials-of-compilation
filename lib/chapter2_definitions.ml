@@ -232,7 +232,7 @@ module type X86_0 = sig
   type 'a arg
   val reg : 'b reg -> 'a arg
   val deref : 'b reg -> int -> 'a arg
-  val int : int -> int arg
+  val int : int -> 'a arg
   val var : string -> 'a arg
 
   type label = string

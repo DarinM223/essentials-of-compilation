@@ -85,24 +85,39 @@ module C1_Pretty = struct
   let if_ a b c = "(if " ^ a ^ " " ^ b ^ " " ^ c ^ ")"
 end
 
-module type X86_1 = sig
-  include Chapter2_definitions.X86_0
-  val byte_reg : 'b reg -> 'a arg
-
-  type cc =
+module CC = struct
+  type t =
     | E
     | L
     | Le
     | G
     | Ge
+  [@@deriving show]
+end
+
+module type X86_1 = sig
+  include Chapter2_definitions.X86_0
+  val byte_reg : 'b reg -> 'a arg
 
   val xorq : 'a arg -> 'b arg -> unit instr
   val cmpq : 'a arg -> 'b arg -> unit instr
-  val set : cc -> 'a arg -> unit instr
+  val set : CC.t -> 'a arg -> unit instr
   val movzbq : 'a arg -> 'b arg -> unit instr
   val jmp : label -> unit instr
-  val jmp_if : cc -> label -> unit instr
+  val jmp_if : CC.t -> label -> unit instr
   val label : label -> unit instr
+end
+
+module X86_1_Pretty = struct
+  include Chapter2_definitions.X86_0_Pretty
+  let byte_reg reg = "(byte-reg" ^ reg ^ ")"
+  let xorq a b = "(xorq" ^ a ^ " " ^ b ^ ")"
+  let cmpq a b = "(cmpq " ^ a ^ " " ^ b ^ ")"
+  let set cc a = "(set " ^ CC.show cc ^ " " ^ a ^ ")"
+  let movzbq a b = "(movzbq " ^ a ^ " " ^ b ^ ")"
+  let jmp l = "(jmp " ^ l ^ ")"
+  let jmp_if cc l = "(jmp-if " ^ CC.show cc ^ " " ^ l ^ ")"
+  let label l = "(label " ^ l ^ ")"
 end
 
 module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
@@ -131,8 +146,7 @@ end
 
 module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
   R2_Shrink with type 'a obs = unit C1.obs = struct
-  module M = Chapter2_passes.ExplicateControl (F) (C1) ()
-  include M
+  include Chapter2_passes.ExplicateControl (F) (C1) ()
 
   let block_map : (string, unit C1.tail) Hashtbl.t = Hashtbl.create 100
   let fresh_block =
@@ -155,7 +169,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
   let var v = function
     | Pred (t, f) ->
       convert_cond C1.(arg (var (F.string_of_var v))) (Pred (t, f))
-    | r -> M.var v r
+    | r -> var v r
 
   let t = function
     | Tail -> C1.(return (arg t))
@@ -227,6 +241,51 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
     let start_body = e Tail in
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
     C1.(program (info [])) (("start", start_body) :: blocks)
+end
+
+module SelectInstructions (F : C1) (X86 : X86_1) :
+  C1 with type 'a obs = unit X86.obs = struct
+  include Chapter2_passes.SelectInstructions (F) (X86)
+
+  let t = (None, X86.int 1)
+  let f = (None, X86.int 0)
+
+  let arg (v', a) = function
+    | If (t, f) -> X86.[ jmp t; jmp_if E f; cmpq (int 0) a ]
+    | r -> arg (v', a) r
+
+  let not (v', arg) = function
+    | Assign v ->
+      if Some v = v' then
+        X86.[ xorq (int 1) (var v) ]
+      else
+        X86.[ xorq (int 1) (var v); movq arg (var v) ]
+    | Return -> X86.[ xorq (int 1) (reg rax); movq arg (reg rax) ]
+    | If (t, f) -> X86.[ jmp f; jmp_if E t; cmpq (int 0) arg ]
+  let ( = ) (_, arg1) (_, arg2) = function
+    | Assign v ->
+      (* The register al is the byte register of rax *)
+      X86.
+        [ movzbq (byte_reg rax) (var v); set E (byte_reg rax); cmpq arg2 arg1 ]
+    | Return ->
+      (* TODO: is the movzbq from al to rax necessary? *)
+      X86.
+        [
+          movzbq (byte_reg rax) (reg rax); set E (byte_reg rax); cmpq arg2 arg1;
+        ]
+    | If (t, f) -> X86.[ jmp f; jmp_if E t; cmpq arg2 arg1 ]
+  let ( < ) (_, arg1) (_, arg2) = function
+    | Assign v ->
+      X86.
+        [ movzbq (byte_reg rax) (var v); set L (byte_reg rax); cmpq arg2 arg1 ]
+    | Return ->
+      X86.
+        [
+          movzbq (byte_reg rax) (reg rax); set L (byte_reg rax); cmpq arg2 arg1;
+        ]
+    | If (t, f) -> X86.[ jmp f; jmp_if L t; cmpq arg2 arg1 ]
+  let goto label = [ X86.jmp label ]
+  let if_ cond t_label f_label = cond (If (t_label, f_label))
 end
 
 module Ex1 (F : R2) = struct
@@ -370,4 +429,78 @@ let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
     (block_f12 . (seq (assign tmp24 6) (if (= tmp1 tmp24) block_t10 block_f11)))
     (block_f4 . (goto block_f2))
     (block_f8 . (goto block_t0)))
+    |}]
+
+let%expect_test "Select instructions" =
+  let module M =
+    Ex6
+      (Shrink
+         (RemoveComplex
+            (ExplicateControl
+               (R2_Shrink_Pretty ())
+               (SelectInstructions (C1_Pretty) (X86_1_Pretty))
+               ()))) in
+  Format.printf "Ex6: %s\n" M.res;
+  [%expect
+    {|
+    Ex6: (program () (start . (block ()
+    (movq (int 5) (var tmp0))
+    (movq (int 6) (var tmp1))
+    (movq (int 5) (var tmp19))
+    (cmpq (var tmp19) (var tmp0))
+    (jmp-if Chapter4.CC.L block_t6)
+    (jmp block_f13)))
+    (block_t3 . (block ()
+    (jmp block_t1)))
+    (block_t0 . (block ()
+    (movq (int 10) (var tmp2))
+    (movq (int 1) (var tmp5))
+    (movq (var tmp5) (var tmp4))
+    (negq (var tmp4))
+    (movq (var tmp2) (var tmp3))
+    (addq (var tmp4) (var tmp3))
+    (movq (var tmp3) (reg rax))
+    (addq (var tmp2) (reg rax))
+    (retq)))
+    (block_f5 . (block ()
+    (cmpq (var tmp1) (var tmp0))
+    (jmp-if Chapter4.CC.L block_t3)
+    (jmp block_f4)))
+    (block_t10 . (block ()
+    (jmp block_t0)))
+    (block_f2 . (block ()
+    (movq (var tmp1) (var tmp12))
+    (negq (var tmp12))
+    (movq (var tmp0) (reg rax))
+    (addq (var tmp12) (reg rax))
+    (retq)))
+    (block_t7 . (block ()
+    (jmp block_f5)))
+    (block_t6 . (block ()
+    (jmp block_f5)))
+    (block_t9 . (block ()
+    (movq (int 1) (var tmp22))
+    (cmpq (int 0) (var tmp22))
+    (jmp-if Chapter4.CC.E block_f8)
+    (jmp block_t7)))
+    (block_f13 . (block ()
+    (movq (int 7) (var tmp21))
+    (cmpq (var tmp21) (var tmp1))
+    (jmp-if Chapter4.CC.E block_t9)
+    (jmp block_f12)))
+    (block_f11 . (block ()
+    (jmp block_f5)))
+    (block_t1 . (block ()
+    (movq (var tmp0) (reg rax))
+    (addq (var tmp1) (reg rax))
+    (retq)))
+    (block_f12 . (block ()
+    (movq (int 6) (var tmp24))
+    (cmpq (var tmp24) (var tmp1))
+    (jmp-if Chapter4.CC.E block_t10)
+    (jmp block_f11)))
+    (block_f4 . (block ()
+    (jmp block_f2)))
+    (block_f8 . (block ()
+    (jmp block_t0))))
     |}]
