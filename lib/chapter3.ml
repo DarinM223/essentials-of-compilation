@@ -68,13 +68,14 @@ module UncoverLivePass (X86 : X86_0) = struct
     let block ?live_after:_ instrs =
       let anns, instrs = List.split instrs in
       let anns = Array.of_list anns in
-      let live_after = Array.make (Array.length anns) StringSet.empty in
-      for i = Array.length anns - 2 downto 0 do
+      (* First element is the live set before the first instruction (live_before). *)
+      let live_after = Array.make (Array.length anns + 1) StringSet.empty in
+      for i = Array.length anns - 1 downto 0 do
         live_after.(i) <-
           StringSet.(
             union
-              (diff live_after.(i + 1) anns.(i + 1).X_instr.vars_write)
-              anns.(i + 1).vars_read)
+              (diff live_after.(i + 1) anns.(i).X_instr.vars_write)
+              anns.(i).vars_read)
       done;
       X86.block ~live_after instrs
   end
@@ -246,11 +247,15 @@ module BuildInterferencePass (X86 : X86_0) = struct
 
     let block ?live_after instrs =
       let live_after' = Option.value ~default:[||] live_after in
+      (* The live_before set is the first element in the live_after array.
+         To get the live_after list for each instruction, ignore the first element.
+      *)
+      let live_after' = List.tl @@ Array.to_list live_after' in
       let acc_block graph =
         List.fold_left
           (fun graph (live_after, (f, _)) -> f live_after graph)
           graph
-          (List.combine (Array.to_list live_after') instrs)
+          (List.combine live_after' instrs)
       in
       let instrs = List.map (fun (_, instr) -> instr) instrs in
       (acc_block, X86.block ?live_after instrs)
@@ -428,8 +433,8 @@ let%expect_test "Example 1 after uncover live" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program () (start . (block ([{v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {y; z};
-      {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+    Ex1: (program () (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
+      y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
     (movq (var v) (var x))
@@ -481,8 +486,8 @@ let%expect_test "Example 1 after build interference" =
                                                          (Chapter2_definitions.Arg.Var
                                                             "w");
                                                          (Chapter2_definitions.Arg.Var
-                                                            "y")}})) (start . (block ([{v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {y; z};
-      {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+                                                            "y")}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
+      y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
     (movq (var v) (var x))
