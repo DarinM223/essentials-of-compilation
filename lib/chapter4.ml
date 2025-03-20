@@ -108,6 +108,33 @@ module type X86_1 = sig
   val label : label -> unit instr
 end
 
+module X86_1_T
+    (X_reg : Chapter1.TRANS)
+    (X_arg : Chapter1.TRANS)
+    (X_instr : Chapter1.TRANS)
+    (X_block : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      X86_1
+        with type 'a reg = 'a X_reg.from
+         and type 'a arg = 'a X_arg.from
+         and type 'a instr = 'a X_instr.from
+         and type 'a block = 'a X_block.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include
+    Chapter2_definitions.X86_0_T (X_reg) (X_arg) (X_instr) (X_block) (X_program)
+      (F)
+  let byte_reg reg = X_arg.fwd @@ F.byte_reg @@ X_reg.bwd reg
+  let xorq a b = X_instr.fwd @@ F.xorq (X_arg.bwd a) (X_arg.bwd b)
+  let cmpq a b = X_instr.fwd @@ F.cmpq (X_arg.bwd a) (X_arg.bwd b)
+  let set cc a = X_instr.fwd @@ F.set cc @@ X_arg.bwd a
+  let movzbq a b = X_instr.fwd @@ F.movzbq (X_arg.bwd a) (X_arg.bwd b)
+  let jmp l = X_instr.fwd @@ F.jmp l
+  let jmp_if cc l = X_instr.fwd @@ F.jmp_if cc l
+  let label l = X_instr.fwd @@ F.label l
+end
+
 module X86_1_Pretty = struct
   include Chapter2_definitions.X86_0_Pretty
   let byte_reg reg = "(byte-reg" ^ reg ^ ")"
@@ -286,6 +313,77 @@ module SelectInstructions (F : C1) (X86 : X86_1) :
     | If (t, f) -> X86.[ jmp f; jmp_if L t; cmpq arg2 arg1 ]
   let goto label = [ X86.jmp label ]
   let if_ cond t_label f_label = cond (If (t_label, f_label))
+end
+
+module UncoverLivePass (X86 : X86_1) = struct
+  open Chapter2_definitions
+  include Chapter3.UncoverLivePass (X86)
+
+  module X_block = struct
+    type 'a from = 'a X86.block
+    type 'a term = {
+      (* Every block requires a list of the live_before sets of its successor blocks.
+         Returns the live before set of the current block along with the rest of the block. *)
+      build_fn : StringSet.t list -> StringSet.t * 'a from;
+      (* List of successor labels for the block. *)
+      successors : X86.label list;
+    }
+    let fwd b = { build_fn = (fun _ -> (StringSet.empty, b)); successors = [] }
+    let bwd { build_fn; _ } = snd (build_fn [])
+  end
+
+  module IDelta = struct
+    let xorq a b = IDelta.two_arg_instr X86.xorq a b
+    let cmpq a b = IDelta.two_arg_instr X86.cmpq a b
+    let set cc = IDelta.one_arg_instr (X86.set cc)
+    let movzbq a b =
+      X86.movzbq (X_arg.bwd a) (X_arg.bwd b)
+      |> X_instr.fwd |> IDelta.add_read a |> IDelta.add_write b
+    let jmp l =
+      let ann, e = X_instr.fwd (X86.jmp l) in
+      (X_instr.{ ann with jmp_label = Some l }, e)
+    let jmp_if cc l =
+      let ann, e = X_instr.fwd (X86.jmp_if cc l) in
+      (X_instr.{ ann with jmp_label = Some l }, e)
+
+    let block ?live_after:_ instrs =
+      let anns, instrs = List.split instrs in
+      let anns = Array.of_list anns in
+      let successors = ref [] in
+      let add_successor ann =
+        match ann.X_instr.jmp_label with
+        | Some succ -> successors := succ :: !successors
+        | None -> ()
+      in
+      Array.iter add_successor anns;
+      let build_fn succ_live_before =
+        (* First element is the live set before the first instruction (live_before). *)
+        let live_after = Array.make (Array.length anns + 1) StringSet.empty in
+        (* Live after set of the block is the union of the live before sets of the
+           successor blocks. *)
+        live_after.(Array.length anns) <-
+          List.fold_left StringSet.union StringSet.empty succ_live_before;
+        for i = Array.length anns - 1 downto 0 do
+          live_after.(i) <-
+            StringSet.(
+              union
+                (diff live_after.(i + 1) anns.(i).X_instr.vars_write)
+                anns.(i).vars_read)
+        done;
+        (live_after.(0), X86.block ~live_after instrs)
+      in
+      { X_block.build_fn; successors = !successors }
+    let program ?stack_size ?conflicts ?moves _blocks =
+      (* TODO: from the blocks construct a graph using the successors and do a reverse topsort.
+         Then for each block in the ordering, pass in the live_before sets of the
+         previously calculated blocks that are successors to the block. *)
+      X86.program ?stack_size ?conflicts ?moves (failwith "")
+  end
+end
+
+module UncoverLive (F : X86_1) = struct
+  module M = UncoverLivePass (F)
+  include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
 end
 
 module Ex1 (F : R2) = struct

@@ -16,10 +16,16 @@ module UncoverLivePass (X86 : X86_0) = struct
     type ann = {
       vars_write : StringSet.t;
       vars_read : StringSet.t;
+      jmp_label : X86.label option;
     }
     type 'a term = ann * 'a from
     let fwd a =
-      ({ vars_write = StringSet.empty; vars_read = StringSet.empty }, a)
+      ( {
+          vars_write = StringSet.empty;
+          vars_read = StringSet.empty;
+          jmp_label = None;
+        },
+        a )
     let bwd (_, a) = a
   end
 
