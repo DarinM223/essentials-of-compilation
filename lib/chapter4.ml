@@ -321,7 +321,8 @@ module StringHashtbl = Hashtbl.Make (String)
 
 module UncoverLivePass (X86 : X86_1) = struct
   open Chapter2_definitions
-  include Chapter3.UncoverLivePass (X86)
+  module M = Chapter3.UncoverLivePass (X86)
+  include M
 
   module X_block = struct
     type 'a from = 'a X86.block
@@ -337,6 +338,7 @@ module UncoverLivePass (X86 : X86_1) = struct
   end
 
   module IDelta = struct
+    include M.IDelta
     let xorq a b = IDelta.two_arg_instr X86.xorq a b
     let cmpq a b = IDelta.two_arg_instr X86.cmpq a b
     let set cc = IDelta.one_arg_instr (X86.set cc)
@@ -653,42 +655,46 @@ let%expect_test "Uncover live" =
                (SelectInstructions (C1_Pretty) (UncoverLive (X86_1_Pretty)))
                ()))) in
   Format.printf "Ex6: %s\n" M.res;
-  (* TODO: figure out why live variables aren't showing up *)
   [%expect
     {|
-    Ex6: (program () (start . (block ([{}; {}; {}; {}; {}; {}; {}])
+    Ex6: (program () (start . (block ([{}; {tmp0}; {tmp0; tmp1}; {tmp0; tmp1; tmp19}; {tmp0; tmp1}; {tmp0; tmp1};
+      {tmp0; tmp1}])
     (movq (int 5) (var tmp0))
     (movq (int 6) (var tmp1))
     (movq (int 5) (var tmp19))
     (cmpq (var tmp19) (var tmp0))
     (jmp-if Chapter4.CC.L block_t6)
     (jmp block_f13)))
-    (block_t6 . (block ([{}; {}])
+    (block_t6 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
     (jmp block_f5)))
-    (block_f13 . (block ([{}; {}; {}; {}; {}])
+    (block_f13 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp21}; {tmp0; tmp1}; {tmp0; tmp1};
+      {tmp0; tmp1}])
     (movq (int 7) (var tmp21))
     (cmpq (var tmp21) (var tmp1))
     (jmp-if Chapter4.CC.E block_t9)
     (jmp block_f12)))
-    (block_t9 . (block ([{}; {}; {}; {}; {}])
+    (block_t9 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp22}; {tmp0; tmp1}; {tmp0; tmp1};
+      {tmp0; tmp1}])
     (movq (int 1) (var tmp22))
     (cmpq (int 0) (var tmp22))
     (jmp-if Chapter4.CC.E block_f8)
     (jmp block_t7)))
-    (block_f12 . (block ([{}; {}; {}; {}; {}])
+    (block_f12 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp24}; {tmp0; tmp1}; {tmp0; tmp1};
+      {tmp0; tmp1}])
     (movq (int 6) (var tmp24))
     (cmpq (var tmp24) (var tmp1))
     (jmp-if Chapter4.CC.E block_t10)
     (jmp block_f11)))
-    (block_t7 . (block ([{}; {}])
+    (block_t7 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
     (jmp block_f5)))
     (block_f8 . (block ([{}; {}])
     (jmp block_t0)))
     (block_t10 . (block ([{}; {}])
     (jmp block_t0)))
-    (block_f11 . (block ([{}; {}])
+    (block_f11 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
     (jmp block_f5)))
-    (block_t0 . (block ([{}; {}; {}; {}; {}; {}; {}; {}; {}; {}])
+    (block_t0 . (block ([{}; {tmp2}; {tmp2; tmp5}; {tmp2; tmp4}; {tmp2; tmp4}; {tmp2; tmp3; tmp4};
+      {tmp2; tmp3}; {tmp2}; {}; {}])
     (movq (int 10) (var tmp2))
     (movq (int 1) (var tmp5))
     (movq (var tmp5) (var tmp4))
@@ -698,19 +704,19 @@ let%expect_test "Uncover live" =
     (movq (var tmp3) (reg rax))
     (addq (var tmp2) (reg rax))
     (retq)))
-    (block_f5 . (block ([{}; {}; {}; {}])
+    (block_f5 . (block ([{tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
     (cmpq (var tmp1) (var tmp0))
     (jmp-if Chapter4.CC.L block_t3)
     (jmp block_f4)))
-    (block_t3 . (block ([{}; {}])
+    (block_t3 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
     (jmp block_t1)))
-    (block_f4 . (block ([{}; {}])
+    (block_f4 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
     (jmp block_f2)))
-    (block_t1 . (block ([{}; {}; {}; {}])
+    (block_t1 . (block ([{tmp0; tmp1}; {tmp1}; {}; {}])
     (movq (var tmp0) (reg rax))
     (addq (var tmp1) (reg rax))
     (retq)))
-    (block_f2 . (block ([{}; {}; {}; {}; {}; {}])
+    (block_f2 . (block ([{tmp0; tmp1}; {tmp0; tmp12}; {tmp0; tmp12}; {tmp12}; {}; {}])
     (movq (var tmp1) (var tmp12))
     (negq (var tmp12))
     (movq (var tmp0) (reg rax))
