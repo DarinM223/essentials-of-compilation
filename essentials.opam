@@ -15,6 +15,7 @@ depends: [
   "ppx_deriving"
   "ppx_hash"
   "ppx_expect"
+  "ocamlgraph"
   "odoc" {with-doc}
 ]
 build: [

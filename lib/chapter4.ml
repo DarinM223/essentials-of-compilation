@@ -315,6 +315,10 @@ module SelectInstructions (F : C1) (X86 : X86_1) :
   let if_ cond t_label f_label = cond (If (t_label, f_label))
 end
 
+module G = Graph.Imperative.Digraph.Concrete (String)
+module Topsort = Graph.Topological.Make (G)
+module StringHashtbl = Hashtbl.Make (String)
+
 module UncoverLivePass (X86 : X86_1) = struct
   open Chapter2_definitions
   include Chapter3.UncoverLivePass (X86)
@@ -373,17 +377,53 @@ module UncoverLivePass (X86 : X86_1) = struct
         (live_after.(0), X86.block ~live_after instrs)
       in
       { X_block.build_fn; successors = !successors }
-    let program ?stack_size ?conflicts ?moves _blocks =
-      (* TODO: from the blocks construct a graph using the successors and do a reverse topsort.
+
+    let rev_topsort_block_labels blocks =
+      let graph = G.create () in
+      List.iter (Fun.compose (G.add_vertex graph) fst) blocks;
+      let add_edges (block_label, { X_block.successors; _ }) =
+        List.iter (G.add_edge graph block_label) successors
+      in
+      List.iter add_edges blocks;
+      let rev_topo_labels = ref [] in
+      Topsort.iter (fun v -> rev_topo_labels := v :: !rev_topo_labels) graph;
+      (G.succ graph, !rev_topo_labels)
+
+    let program ?stack_size ?conflicts ?moves blocks =
+      let build_fn_map =
+        blocks
+        |> List.map (fun (label, { X_block.build_fn; _ }) -> (label, build_fn))
+        |> List.to_seq |> StringHashtbl.of_seq
+      in
+      (* From the blocks construct a graph using the successors and do a reverse topsort.
          Then for each block in the ordering, pass in the live_before sets of the
          previously calculated blocks that are successors to the block. *)
-      X86.program ?stack_size ?conflicts ?moves (failwith "")
+      let block_succ, rev_topsort_labels = rev_topsort_block_labels blocks in
+      let cached_live_before = StringHashtbl.create (List.length blocks) in
+      let result_blocks = StringHashtbl.create (List.length blocks) in
+      let go label =
+        let succ_live_before =
+          List.map (StringHashtbl.find cached_live_before) (block_succ label)
+        in
+        let build_fn = StringHashtbl.find build_fn_map label in
+        let live_before, block = build_fn succ_live_before in
+        StringHashtbl.add cached_live_before label live_before;
+        StringHashtbl.add result_blocks label block
+      in
+      List.iter go rev_topsort_labels;
+      let blocks =
+        rev_topsort_labels |> List.rev
+        |> List.map (fun label ->
+               (label, StringHashtbl.find result_blocks label))
+      in
+      X86.program ?stack_size ?conflicts ?moves blocks
   end
 end
 
 module UncoverLive (F : X86_1) = struct
   module M = UncoverLivePass (F)
   include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
 end
 
 module Ex1 (F : R2) = struct
@@ -601,4 +641,79 @@ let%expect_test "Select instructions" =
     (jmp block_f2)))
     (block_f8 . (block ()
     (jmp block_t0))))
+    |}]
+
+let%expect_test "Uncover live" =
+  let module M =
+    Ex6
+      (Shrink
+         (RemoveComplex
+            (ExplicateControl
+               (R2_Shrink_Pretty ())
+               (SelectInstructions (C1_Pretty) (UncoverLive (X86_1_Pretty)))
+               ()))) in
+  Format.printf "Ex6: %s\n" M.res;
+  (* TODO: figure out why live variables aren't showing up *)
+  [%expect
+    {|
+    Ex6: (program () (start . (block ([{}; {}; {}; {}; {}; {}; {}])
+    (movq (int 5) (var tmp0))
+    (movq (int 6) (var tmp1))
+    (movq (int 5) (var tmp19))
+    (cmpq (var tmp19) (var tmp0))
+    (jmp-if Chapter4.CC.L block_t6)
+    (jmp block_f13)))
+    (block_t6 . (block ([{}; {}])
+    (jmp block_f5)))
+    (block_f13 . (block ([{}; {}; {}; {}; {}])
+    (movq (int 7) (var tmp21))
+    (cmpq (var tmp21) (var tmp1))
+    (jmp-if Chapter4.CC.E block_t9)
+    (jmp block_f12)))
+    (block_t9 . (block ([{}; {}; {}; {}; {}])
+    (movq (int 1) (var tmp22))
+    (cmpq (int 0) (var tmp22))
+    (jmp-if Chapter4.CC.E block_f8)
+    (jmp block_t7)))
+    (block_f12 . (block ([{}; {}; {}; {}; {}])
+    (movq (int 6) (var tmp24))
+    (cmpq (var tmp24) (var tmp1))
+    (jmp-if Chapter4.CC.E block_t10)
+    (jmp block_f11)))
+    (block_t7 . (block ([{}; {}])
+    (jmp block_f5)))
+    (block_f8 . (block ([{}; {}])
+    (jmp block_t0)))
+    (block_t10 . (block ([{}; {}])
+    (jmp block_t0)))
+    (block_f11 . (block ([{}; {}])
+    (jmp block_f5)))
+    (block_t0 . (block ([{}; {}; {}; {}; {}; {}; {}; {}; {}; {}])
+    (movq (int 10) (var tmp2))
+    (movq (int 1) (var tmp5))
+    (movq (var tmp5) (var tmp4))
+    (negq (var tmp4))
+    (movq (var tmp2) (var tmp3))
+    (addq (var tmp4) (var tmp3))
+    (movq (var tmp3) (reg rax))
+    (addq (var tmp2) (reg rax))
+    (retq)))
+    (block_f5 . (block ([{}; {}; {}; {}])
+    (cmpq (var tmp1) (var tmp0))
+    (jmp-if Chapter4.CC.L block_t3)
+    (jmp block_f4)))
+    (block_t3 . (block ([{}; {}])
+    (jmp block_t1)))
+    (block_f4 . (block ([{}; {}])
+    (jmp block_f2)))
+    (block_t1 . (block ([{}; {}; {}; {}])
+    (movq (var tmp0) (reg rax))
+    (addq (var tmp1) (reg rax))
+    (retq)))
+    (block_f2 . (block ([{}; {}; {}; {}; {}; {}])
+    (movq (var tmp1) (var tmp12))
+    (negq (var tmp12))
+    (movq (var tmp0) (reg rax))
+    (addq (var tmp12) (reg rax))
+    (retq))))
     |}]

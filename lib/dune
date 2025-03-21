@@ -3,5 +3,6 @@
  (inline_tests)
  (preprocess
   (pps ppx_deriving.std ppx_hash ppx_expect))
+ (libraries ocamlgraph)
  (flags
   (:standard -w -57+71-37)))
