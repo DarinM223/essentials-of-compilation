@@ -212,7 +212,6 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
 
   let assign v e = e (Assign v)
 
-  (* TODO: jump to exit block and mark exit block so that stack can unwind before retq *)
   let return e = X86.retq :: e Return
 
   let ( @> ) stmts1 stmts2 = stmts2 @ stmts1

@@ -322,6 +322,8 @@ module SelectInstructions (F : C1) (X86 : X86_1) :
   C1 with type 'a obs = unit X86.obs = struct
   include Chapter2_passes.SelectInstructions (F) (X86)
 
+  let exit_label = "block_exit"
+  let return e = X86.jmp exit_label :: e Return
   let t = (None, X86.int 1)
   let f = (None, X86.int 0)
 
@@ -361,6 +363,10 @@ module SelectInstructions (F : C1) (X86 : X86_1) :
     | If (t, f) -> X86.[ jmp f; jmp_if L t; cmpq arg2 arg1 ]
   let goto label = [ X86.jmp label ]
   let if_ cond t_label f_label = cond (If (t_label, f_label))
+  let program _ body =
+    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_block = (exit_label, X86.(block [ retq ])) in
+    X86.program (exit_block :: body)
 end
 
 module G = Graph.Imperative.Digraph.Concrete (String)
@@ -700,7 +706,9 @@ let%expect_test "Select instructions" =
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
-    Ex6: (program () (start . (block ()
+    Ex6: (program () (block_exit . (block ()
+    (retq)))
+    (start . (block ()
     (movq (int 5) (var tmp0))
     (movq (int 6) (var tmp1))
     (movq (int 5) (var tmp19))
@@ -718,7 +726,7 @@ let%expect_test "Select instructions" =
     (addq (var tmp4) (var tmp3))
     (movq (var tmp3) (reg rax))
     (addq (var tmp2) (reg rax))
-    (retq)))
+    (jmp block_exit)))
     (block_f5 . (block ()
     (cmpq (var tmp1) (var tmp0))
     (jmp-if Chapter4.CC.L block_t3)
@@ -730,7 +738,7 @@ let%expect_test "Select instructions" =
     (negq (var tmp12))
     (movq (var tmp0) (reg rax))
     (addq (var tmp12) (reg rax))
-    (retq)))
+    (jmp block_exit)))
     (block_t7 . (block ()
     (jmp block_f5)))
     (block_t6 . (block ()
@@ -750,7 +758,7 @@ let%expect_test "Select instructions" =
     (block_t1 . (block ()
     (movq (var tmp0) (reg rax))
     (addq (var tmp1) (reg rax))
-    (retq)))
+    (jmp block_exit)))
     (block_f12 . (block ()
     (movq (int 6) (var tmp24))
     (cmpq (var tmp24) (var tmp1))
@@ -820,7 +828,7 @@ let%expect_test "Uncover live" =
     (addq (var tmp4) (var tmp3))
     (movq (var tmp3) (reg rax))
     (addq (var tmp2) (reg rax))
-    (retq)))
+    (jmp block_exit)))
     (block_f5 . (block ([{tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
     (cmpq (var tmp1) (var tmp0))
     (jmp-if Chapter4.CC.L block_t3)
@@ -832,12 +840,14 @@ let%expect_test "Uncover live" =
     (block_t1 . (block ([{tmp0; tmp1}; {tmp1}; {}; {}])
     (movq (var tmp0) (reg rax))
     (addq (var tmp1) (reg rax))
-    (retq)))
+    (jmp block_exit)))
     (block_f2 . (block ([{tmp0; tmp1}; {tmp0; tmp12}; {tmp0; tmp12}; {tmp12}; {}; {}])
     (movq (var tmp1) (var tmp12))
     (negq (var tmp12))
     (movq (var tmp0) (reg rax))
     (addq (var tmp12) (reg rax))
+    (jmp block_exit)))
+    (block_exit . (block ([{}; {}])
     (retq))))
     |}]
 
@@ -913,7 +923,7 @@ let%expect_test "Allocate Registers" =
       addq %rbx, %rdx
       movq %rdx, %rax
       addq %rcx, %rax
-      retq
+      j block_exit
     block_f5:
 
       cmpq %rbx, %rdx
@@ -929,13 +939,16 @@ let%expect_test "Allocate Registers" =
 
       movq %rdx, %rax
       addq %rbx, %rax
-      retq
+      j block_exit
     block_f2:
 
       movq %rbx, %rbx
       negq %rbx
       movq %rdx, %rax
       addq %rbx, %rax
+      j block_exit
+    block_exit:
+
       addq $8, %rsp
       retq
     |}]
