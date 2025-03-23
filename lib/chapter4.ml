@@ -108,6 +108,26 @@ module type X86_1 = sig
   val label : label -> unit instr
 end
 
+module X86_1_R_T (R : Chapter1.Reader) (F : X86_1) :
+  X86_1
+    with type 'a reg = R.t -> 'a F.reg
+     and type 'a arg = R.t -> 'a F.arg
+     and type 'a instr = R.t -> 'a F.instr
+     and type 'a block = R.t -> 'a F.block
+     and type 'a program = unit -> 'a F.program
+     and type label = F.label
+     and type 'a obs = 'a F.obs = struct
+  include Chapter2_definitions.X86_0_R_T (R) (F)
+  let byte_reg r ctx = F.byte_reg (r ctx)
+  let xorq a b ctx = F.xorq (a ctx) (b ctx)
+  let cmpq a b ctx = F.cmpq (a ctx) (b ctx)
+  let set cc a ctx = F.set cc (a ctx)
+  let movzbq a b ctx = F.movzbq (a ctx) (b ctx)
+  let jmp l _ = F.jmp l
+  let jmp_if cc l _ = F.jmp_if cc l
+  let label l _ = F.label l
+end
+
 module X86_1_T
     (X_reg : Chapter1.TRANS)
     (X_arg : Chapter1.TRANS)
@@ -145,6 +165,34 @@ module X86_1_Pretty = struct
   let jmp l = "(jmp " ^ l ^ ")"
   let jmp_if cc l = "(jmp-if " ^ CC.show cc ^ " " ^ l ^ ")"
   let label l = "(label " ^ l ^ ")"
+end
+
+module X86_1_Printer = struct
+  include Chapter2_passes.X86_0_Printer
+
+  (* TODO: handle other registers *)
+  let byte_reg = function
+    | "%rax" -> "%al"
+    | _ -> failwith "Unknown register"
+
+  let xorq a b = "xorq " ^ a ^ ", " ^ b
+  let cmpq a b = "cmpq " ^ a ^ ", " ^ b
+
+  (* TODO: handle this instruction *)
+  let set cc a = "set " ^ CC.show cc ^ ", " ^ a
+  let movzbq a b = "movzbq " ^ a ^ ", " ^ b
+  let jmp l = "j " ^ l
+  let jmp_if cc l =
+    let jmp_instr =
+      match cc with
+      | CC.E -> "je"
+      | CC.G -> "jg"
+      | CC.Ge -> "jge"
+      | CC.L -> "jl"
+      | CC.Le -> "jle"
+    in
+    jmp_instr ^ " " ^ l
+  let label l = l ^ ":"
 end
 
 module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
@@ -321,8 +369,7 @@ module StringHashtbl = Hashtbl.Make (String)
 
 module UncoverLivePass (X86 : X86_1) = struct
   open Chapter2_definitions
-  module M = Chapter3.UncoverLivePass (X86)
-  include M
+  include Chapter3.UncoverLivePass (X86)
 
   module X_block = struct
     type 'a from = 'a X86.block
@@ -338,7 +385,7 @@ module UncoverLivePass (X86 : X86_1) = struct
   end
 
   module IDelta = struct
-    include M.IDelta
+    include IDelta
     let xorq a b = IDelta.two_arg_instr X86.xorq a b
     let cmpq a b = IDelta.two_arg_instr X86.cmpq a b
     let set cc = IDelta.one_arg_instr (X86.set cc)
@@ -425,6 +472,76 @@ end
 module UncoverLive (F : X86_1) = struct
   module M = UncoverLivePass (F)
   include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
+module BuildInterferencePass (X86 : X86_1) = struct
+  include Chapter3.BuildInterferencePass (X86)
+  module IDelta = struct
+    include IDelta
+
+    let byte_reg r = (Some (arg_of_reg r), X86.byte_reg r)
+
+    let xorq (_, a) (dest, b) =
+      match dest with
+      | Some dest -> (arith dest, X86.xorq a b)
+      | None -> X_instr.fwd @@ X86.xorq a b
+
+    let set cc (dest, a) =
+      match dest with
+      | Some dest -> (arith dest, X86.set cc a)
+      | None -> X_instr.fwd @@ X86.set cc a
+
+    let movzbq (src, a) (dest, b) =
+      let open Chapter2_definitions in
+      match dest with
+      | Some dest ->
+        let acc_graph live_after graph =
+          StringSet.fold
+            (fun v graph ->
+              let v = Arg.Var v in
+              if Some v = src || v = dest then
+                graph
+              else
+                Chapter3.GraphUtils.add_interference dest v graph)
+            live_after graph
+        in
+        (acc_graph, X86.movzbq a b)
+      | None -> X_instr.fwd @@ X86.movzbq a b
+  end
+end
+
+module BuildInterference (F : X86_1) : X86_1 with type 'a obs = 'a F.obs =
+struct
+  module M = BuildInterferencePass (F)
+  include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
+module BuildMovesPass (X86 : X86_1) = struct
+  include Chapter3.BuildMovesPass (X86)
+  module IDelta = struct
+    include IDelta
+
+    let byte_reg r = (Some (arg_of_reg r), X86.byte_reg r)
+    let movzbq (arg1, a) (arg2, b) =
+      match (arg1, arg2) with
+      | Some arg1, Some arg2 ->
+        (Chapter3.GraphUtils.add_interference arg1 arg2, X86.movzbq a b)
+      | _ -> X_instr.fwd @@ X86.movzbq a b
+  end
+end
+
+module BuildMoves (F : X86_1) : X86_1 with type 'a obs = 'a F.obs = struct
+  module M = BuildMovesPass (F)
+  include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
+module AllocateRegisters (X86 : X86_1) : X86_1 with type 'a obs = 'a X86.obs =
+struct
+  module M = Chapter3.AllocateRegistersPass (X86)
+  include X86_1_R_T (M.X_reader) (X86)
   include M.IDelta
 end
 
@@ -722,4 +839,103 @@ let%expect_test "Uncover live" =
     (movq (var tmp0) (reg rax))
     (addq (var tmp12) (reg rax))
     (retq))))
+    |}]
+
+let%expect_test "Allocate Registers" =
+  let module M =
+    Ex6
+      (Shrink
+         (RemoveComplex
+            (ExplicateControl
+               (R2_Shrink_Pretty ())
+               (SelectInstructions
+                  (C1_Pretty)
+                  (UncoverLive
+                     (BuildInterference
+                        (BuildMoves (AllocateRegisters (X86_1_Printer))))))
+               ()))) in
+  print_endline M.res;
+  [%expect
+    {|
+    .global _start
+    .text
+    _start:
+      movq %rsp, %rbp
+      subq $8, %rsp
+    start:
+
+      movq $5, %rdx
+      movq $6, %rbx
+      movq $5, %rcx
+      cmpq %rcx, %rdx
+      jl block_t6
+      j block_f13
+    block_t6:
+
+      j block_f5
+    block_f13:
+
+      movq $7, %rcx
+      cmpq %rcx, %rbx
+      je block_t9
+      j block_f12
+    block_t9:
+
+      movq $1, %rcx
+      cmpq $0, %rcx
+      je block_f8
+      j block_t7
+    block_f12:
+
+      movq $6, %rcx
+      cmpq %rcx, %rbx
+      je block_t10
+      j block_f11
+    block_t7:
+
+      j block_f5
+    block_f8:
+
+      j block_t0
+    block_t10:
+
+      j block_t0
+    block_f11:
+
+      j block_f5
+    block_t0:
+
+      movq $10, %rcx
+      movq $1, %rbx
+      movq %rbx, %rbx
+      negq %rbx
+      movq %rcx, %rdx
+      addq %rbx, %rdx
+      movq %rdx, %rax
+      addq %rcx, %rax
+      retq
+    block_f5:
+
+      cmpq %rbx, %rdx
+      jl block_t3
+      j block_f4
+    block_t3:
+
+      j block_t1
+    block_f4:
+
+      j block_f2
+    block_t1:
+
+      movq %rdx, %rax
+      addq %rbx, %rax
+      retq
+    block_f2:
+
+      movq %rbx, %rbx
+      negq %rbx
+      movq %rdx, %rax
+      addq %rbx, %rax
+      addq $8, %rsp
+      retq
     |}]
