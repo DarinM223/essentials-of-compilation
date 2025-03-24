@@ -170,18 +170,40 @@ end
 module X86_1_Printer = struct
   include Chapter2_passes.X86_0_Printer
 
-  (* TODO: handle other registers *)
   let byte_reg = function
+    | "%rsp" -> "%spl"
+    | "%rbp" -> "%bpl"
     | "%rax" -> "%al"
+    | "%rbx" -> "%bl"
+    | "%rcx" -> "%cl"
+    | "%rdx" -> "%dl"
+    | "%rsi" -> "%sil"
+    | "%rdi" -> "%dil"
+    | "%r8" -> "%r8b"
+    | "%r9" -> "%r9b"
+    | "%r10" -> "%r10b"
+    | "%r11" -> "%r11b"
+    | "%r12" -> "%r12b"
+    | "%r13" -> "%r13b"
+    | "%r14" -> "%r14b"
+    | "%r15" -> "%r15b"
     | _ -> failwith "Unknown register"
 
   let xorq a b = "xorq " ^ a ^ ", " ^ b
   let cmpq a b = "cmpq " ^ a ^ ", " ^ b
 
-  (* TODO: handle this instruction *)
-  let set cc a = "set " ^ CC.show cc ^ ", " ^ a
+  let set cc a =
+    let set_instr =
+      match cc with
+      | CC.E -> "sete"
+      | CC.G -> "setg"
+      | CC.Ge -> "setge"
+      | CC.L -> "setl"
+      | CC.Le -> "setle"
+    in
+    set_instr ^ " " ^ a
   let movzbq a b = "movzbq " ^ a ^ ", " ^ b
-  let jmp l = "j " ^ l
+  let jmp l = "jmp " ^ l
   let jmp_if cc l =
     let jmp_instr =
       match cc with
@@ -562,6 +584,21 @@ module Ex1 (F : R2) = struct
     if_ (andd (var a <= int 5) (var b > var a)) (var b - var a) (var b + var a)
 end
 
+module PatchInstructionsPass (X86 : X86_1) = struct
+  include Chapter2_passes.PatchInstructionsPass (X86)
+  module IDelta = struct
+    include IDelta
+    let byte_reg r = (ArgInfo.HashedRegister (Hashtbl.hash r), X86.byte_reg r)
+    (* TODO handle other instructions *)
+  end
+end
+
+module PatchInstructions (F : X86_1) = struct
+  module M = PatchInstructionsPass (F)
+  include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
 module Ex2 (F : R2) = struct
   open F
   let res =
@@ -879,40 +916,40 @@ let%expect_test "Allocate Registers" =
       movq $5, %rcx
       cmpq %rcx, %rdx
       jl block_t6
-      j block_f13
+      jmp block_f13
     block_t6:
 
-      j block_f5
+      jmp block_f5
     block_f13:
 
       movq $7, %rcx
       cmpq %rcx, %rbx
       je block_t9
-      j block_f12
+      jmp block_f12
     block_t9:
 
       movq $1, %rcx
       cmpq $0, %rcx
       je block_f8
-      j block_t7
+      jmp block_t7
     block_f12:
 
       movq $6, %rcx
       cmpq %rcx, %rbx
       je block_t10
-      j block_f11
+      jmp block_f11
     block_t7:
 
-      j block_f5
+      jmp block_f5
     block_f8:
 
-      j block_t0
+      jmp block_t0
     block_t10:
 
-      j block_t0
+      jmp block_t0
     block_f11:
 
-      j block_f5
+      jmp block_f5
     block_t0:
 
       movq $10, %rcx
@@ -923,30 +960,30 @@ let%expect_test "Allocate Registers" =
       addq %rbx, %rdx
       movq %rdx, %rax
       addq %rcx, %rax
-      j block_exit
+      jmp block_exit
     block_f5:
 
       cmpq %rbx, %rdx
       jl block_t3
-      j block_f4
+      jmp block_f4
     block_t3:
 
-      j block_t1
+      jmp block_t1
     block_f4:
 
-      j block_f2
+      jmp block_f2
     block_t1:
 
       movq %rdx, %rax
       addq %rbx, %rax
-      j block_exit
+      jmp block_exit
     block_f2:
 
       movq %rbx, %rbx
       negq %rbx
       movq %rdx, %rax
       addq %rbx, %rax
-      j block_exit
+      jmp block_exit
     block_exit:
 
       addq $8, %rsp
