@@ -48,7 +48,6 @@ block_t0:
 
   movq $10, %rcx
   movq $1, %rbx
-  movq %rbx, %rbx
   negq %rbx
   movq %rcx, %rdx
   addq %rbx, %rdx
@@ -73,7 +72,6 @@ block_t1:
   jmp block_exit
 block_f2:
 
-  movq %rbx, %rbx
   negq %rbx
   movq %rdx, %rax
   addq %rbx, %rax

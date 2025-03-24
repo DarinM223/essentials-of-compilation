@@ -588,8 +588,29 @@ module PatchInstructionsPass (X86 : X86_1) = struct
   include Chapter2_passes.PatchInstructionsPass (X86)
   module IDelta = struct
     include IDelta
+    open ArgInfo
     let byte_reg r = (ArgInfo.HashedRegister (Hashtbl.hash r), X86.byte_reg r)
-    (* TODO handle other instructions *)
+
+    let xorq (info1, a) (info2, b) =
+      match (info1, info2) with
+      | MemoryReference _, MemoryReference _ ->
+        X86.[ movq a (reg rax); xorq (reg rax) b ]
+      | _ -> X_instr.fwd @@ X86.xorq a b
+    let cmpq (info1, a) (info2, b) =
+      match (info1, info2) with
+      | MemoryReference _, MemoryReference _ ->
+        X86.[ movq a (reg rax); cmpq (reg rax) b ]
+      | _, (MemoryReference _ | HashedRegister _) -> X_instr.fwd @@ X86.cmpq a b
+      (* Destination with immediate *)
+      | _ -> X86.[ movq b (reg rax); cmpq a (reg rax) ]
+    let movzbq (info1, a) (info2, b) =
+      if ArgInfo.equal info1 info2 then
+        []
+      else
+        match (info1, info2) with
+        | MemoryReference _, MemoryReference _ ->
+          X86.[ movq a (reg rax); movzbq (reg rax) b ]
+        | _ -> X_instr.fwd @@ X86.movzbq a b
   end
 end
 
@@ -899,7 +920,8 @@ let%expect_test "Allocate Registers" =
                   (C1_Pretty)
                   (UncoverLive
                      (BuildInterference
-                        (BuildMoves (AllocateRegisters (X86_1_Printer))))))
+                        (BuildMoves
+                           (AllocateRegisters (PatchInstructions (X86_1_Printer)))))))
                ()))) in
   print_endline M.res;
   [%expect
@@ -954,7 +976,6 @@ let%expect_test "Allocate Registers" =
 
       movq $10, %rcx
       movq $1, %rbx
-      movq %rbx, %rbx
       negq %rbx
       movq %rcx, %rdx
       addq %rbx, %rdx
@@ -979,7 +1000,6 @@ let%expect_test "Allocate Registers" =
       jmp block_exit
     block_f2:
 
-      movq %rbx, %rbx
       negq %rbx
       movq %rdx, %rax
       addq %rbx, %rax
