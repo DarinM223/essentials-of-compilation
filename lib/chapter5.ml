@@ -136,6 +136,50 @@ module R2_AnnotateTypes (F : Chapter4.R2) :
   let observe p = F.observe p
 end
 
+module R3_Annotate_Types (F : R3) :
+  R3
+    with type 'a var = 'a F.var
+     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  include R2_AnnotateTypes (F)
+  open R3_Types
+  module ExpHList = HList (struct
+    type 'a t = 'a exp
+  end)
+  let void _ = (`Void, F.void)
+  let vector hl m =
+    let rec go : type a. a ExpHList.hlist -> typ list * a F.ExpHList.hlist =
+      function
+      | ExpHList.(e :: xs) ->
+        let typ, e = e m in
+        let res_typs, res_es = go xs in
+        (typ :: res_typs, F.ExpHList.(e :: res_es))
+      | ExpHList.[] -> ([], F.ExpHList.[])
+    in
+    let res_typs, res_es = go hl in
+    (`Vector res_typs, F.vector res_es)
+  let vector_ref e ptr m =
+    let (t : typ), e = e m in
+    let typs =
+      match t with
+      | `Vector typs -> typs
+      | _ -> failwith "Expected vector type as argument to vector_ref"
+    in
+    let rec index_typ : type a r. typ list -> (a, r) ptr -> typ =
+     fun typs ptr ->
+      match (typs, ptr) with
+      | typ :: _, Here -> typ
+      | _ :: typs, Next ptr -> index_typ typs ptr
+      | [], _ -> failwith "Cannot get type from the index"
+    in
+    (index_typ typs ptr, F.vector_ref e ptr)
+  let vector_set e ptr v m =
+    let _, e = e m in
+    let _, v = v m in
+    (`Void, F.vector_set e ptr v)
+end
+
 module type R3_Collect = sig
   include R3
   val collect : int -> unit exp
