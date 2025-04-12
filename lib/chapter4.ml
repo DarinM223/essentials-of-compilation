@@ -60,6 +60,18 @@ module R2_Shrink_Pretty () = struct
   let if_ a b c = "(if " ^ a ^ " " ^ b ^ " " ^ c ^ ")"
 end
 
+module R2_Pretty () = struct
+  include R2_Shrink_Pretty ()
+  let ( - ) a b = "(- " ^ a ^ " " ^ b ^ ")"
+
+  let andd a b = "(and " ^ a ^ " " ^ b ^ ")"
+  let orr a b = "(or " ^ a ^ " " ^ b ^ ")"
+  let ( <> ) a b = "(<> " ^ a ^ " " ^ b ^ ")"
+  let ( <= ) a b = "(<= " ^ a ^ " " ^ b ^ ")"
+  let ( > ) a b = "(> " ^ a ^ " " ^ b ^ ")"
+  let ( >= ) a b = "(>= " ^ a ^ " " ^ b ^ ")"
+end
+
 module type C1 = sig
   include Chapter2_definitions.C0
   val t : bool arg
