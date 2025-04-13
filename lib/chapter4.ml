@@ -266,80 +266,86 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
     let label = fresh_block block_name in
     Hashtbl.add block_map label body;
     label
-  let convert_cond e = function
-    | Tail -> C1.return e
-    | Assign (v, body) -> C1.(assign v e @> body ())
+  let convert_cond e m = function
+    | Tail -> C1.return (m.f e)
+    | Assign (v, body) -> C1.(assign v (m.f e) @> body ())
     | Pred (t, f) ->
       let t_label = insert_block "block_t" (t ()) in
       let f_label = insert_block "block_f" (f ()) in
-      C1.if_ e t_label f_label
+      C1.if_ (m.f e) t_label f_label
 
-  let var v = function
+  let var v m = function
     | Pred (t, f) ->
-      convert_cond C1.(arg (var (F.string_of_var v))) (Pred (t, f))
-    | r -> var v r
+      convert_cond C1.(arg (var (F.string_of_var v))) m (Pred (t, f))
+    | r -> var v m r
 
-  let t = function
+  let t m = function
     | Pred (t, _) -> t ()
-    | ctx -> convert_cond C1.(arg t) ctx
-  let f = function
+    | ctx -> convert_cond C1.(arg t) m ctx
+  let f m = function
     | Pred (_, f) -> f ()
-    | ctx -> convert_cond C1.(arg f) ctx
-  let not e = function
-    | Pred (t, f) -> e (Pred (f, t))
+    | ctx -> convert_cond C1.(arg f) m ctx
+  let not e m = function
+    | Pred (t, f) -> e ann_id (Pred (f, t))
     | ctx ->
       let tmp = F.(string_of_var (fresh ())) in
-      e (Assign (tmp, fun () -> convert_cond C1.(not (var (lookup tmp))) ctx))
-  let ( = ) a b r =
+      e ann_id
+        (Assign (tmp, fun () -> convert_cond C1.(not (var (lookup tmp))) m ctx))
+  let ( = ) a b m r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in
-    a
+    a ann_id
       (Assign
          ( tmp1,
            fun () ->
-             b
+             b ann_id
                (Assign
                   ( tmp2,
                     fun () ->
-                      convert_cond C1.(var (lookup tmp1) = var (lookup tmp2)) r
-                  )) ))
-  let ( < ) a b r =
+                      convert_cond
+                        C1.(var (lookup tmp1) = var (lookup tmp2))
+                        m r )) ))
+  let ( < ) a b m r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in
-    a
+    a ann_id
       (Assign
          ( tmp1,
            fun () ->
-             b
+             b ann_id
                (Assign
                   ( tmp2,
                     fun () ->
-                      convert_cond C1.(var (lookup tmp1) < var (lookup tmp2)) r
-                  )) ))
+                      convert_cond
+                        C1.(var (lookup tmp1) < var (lookup tmp2))
+                        m r )) ))
 
-  let if_ cond t_branch f_branch = function
+  let if_ cond t_branch f_branch m = function
     | Tail ->
-      let t_label = insert_block "block_t" @@ t_branch Tail in
-      let f_label = insert_block "block_f" @@ f_branch Tail in
-      cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
+      let t_label = insert_block "block_t" @@ t_branch m Tail in
+      let f_label = insert_block "block_f" @@ f_branch m Tail in
+      cond ann_id
+        (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
     | Assign (v, body) ->
       let body_label = insert_block "block_body" @@ body () in
       let t_label =
-        insert_block "block_t" @@ t_branch
+        insert_block "block_t" @@ t_branch m
         @@ Assign (v, fun () -> C1.goto body_label)
       in
       let f_label =
-        insert_block "block_f" @@ f_branch
+        insert_block "block_f" @@ f_branch m
         @@ Assign (v, fun () -> C1.goto body_label)
       in
-      cond (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
+      cond ann_id
+        (Pred ((fun () -> C1.goto t_label), fun () -> C1.goto f_label))
     | Pred (t, f) ->
-      cond
+      cond ann_id
         (Pred
-           ((fun () -> t_branch (Pred (t, f))), fun () -> f_branch (Pred (t, f))))
+           ( (fun () -> t_branch m (Pred (t, f))),
+             fun () -> f_branch m (Pred (t, f)) ))
 
   let program e () =
-    let start_body = e Tail in
+    let start_body = e ann_id Tail in
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
     C1.(program (info [])) (("start", start_body) :: blocks)
 end

@@ -58,7 +58,10 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
     | Tail
     | Assign of string * (unit -> unit C0.tail)
     | Pred of (unit -> unit C0.tail) * (unit -> unit C0.tail)
-  type 'a exp = ctx -> unit C0.tail
+  type ann_exp = { f : 'a. 'a C0.exp -> 'a C0.exp }
+  let ann_id = { f = Fun.id }
+
+  type 'a exp = ann_exp -> ctx -> unit C0.tail
   type 'a program = unit -> unit C0.program
   type 'a var = 'a F.var
 
@@ -68,46 +71,47 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
   let string_of_var = F.string_of_var
   let fresh = F.fresh
 
-  let convert_exp e = function
-    | Tail -> C0.return e
-    | Assign (v, body) -> C0.(assign v e @> body ())
+  let convert_exp e m = function
+    | Tail -> C0.return (m.f e)
+    | Assign (v, body) -> C0.(assign v (m.f e) @> body ())
     | Pred _ ->
       failwith "Cannot have a non-boolean expression inside of a predicate"
   let int i = convert_exp C0.(arg (int i))
 
   let read () = convert_exp C0.(read ())
-  let neg e r =
+  let neg e m r =
     let tmp = F.(string_of_var (fresh ())) in
-    e (Assign (tmp, fun () -> convert_exp C0.(neg (var (lookup tmp))) r))
+    e ann_id
+      (Assign (tmp, fun () -> convert_exp C0.(neg (var (lookup tmp))) m r))
 
-  let ( + ) e1 e2 r =
+  let ( + ) e1 e2 m r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in
-    e1
+    e1 ann_id
       (Assign
          ( tmp1,
            fun () ->
-             e2
+             e2 ann_id
                (Assign
                   ( tmp2,
                     fun () ->
-                      convert_exp C0.(var (lookup tmp1) + var (lookup tmp2)) r
+                      convert_exp C0.(var (lookup tmp1) + var (lookup tmp2)) m r
                   )) ))
 
-  let var v r =
+  let var v m r =
     let v = lookup (F.string_of_var v) in
     match r with
-    | Tail -> C0.(return (arg (var v)))
+    | Tail -> C0.(return (m.f (arg (var v))))
     | Assign (v', body) ->
       Hashtbl.add table v' v;
       body ()
     | Pred _ -> failwith "Predicate for var not handled yet"
 
-  let ( let* ) e f r =
+  let ( let* ) e f m r =
     let tmp = F.fresh () in
-    e (Assign (F.string_of_var tmp, fun () -> f tmp r))
+    e m (Assign (F.string_of_var tmp, fun () -> f tmp ann_id r))
 
-  let program e () = C0.(program (info []) [ ("start", e Tail) ])
+  let program e () = C0.(program (info []) [ ("start", e ann_id Tail) ])
 
   type 'a obs = unit C0.obs
   let observe p = C0.observe (p ())

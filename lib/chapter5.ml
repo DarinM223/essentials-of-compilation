@@ -179,7 +179,7 @@ module R3_Annotate_Types (F : R3) :
 
   let has_type e ty m =
     let _, e = e m in
-    (ty, F.has_type e ty)
+    (ty, e)
   let void _ = (`Void, F.has_type F.void `Void)
   let vector hl m =
     let rec go : type a. a ExpHList.hlist -> typ list * a F.ExpHList.hlist =
@@ -283,6 +283,7 @@ end
 
 module type C2 = sig
   include Chapter4.C1
+  val has_type : 'a exp -> R3_Types.typ -> 'a exp
   val allocate : int -> R3_Types.typ -> 'a exp
   val vector_ref : 'tup arg -> ('a, 'tup) ptr -> 'a exp
   val vector_set : 'tup arg -> ('a, 'tup) ptr -> 'a arg -> unit exp
@@ -298,6 +299,9 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
     type 'a t = 'a exp
   end)
 
+  let has_type e ty _ r =
+    let ann_fn = { f = (fun exp -> C2.has_type exp ty) } in
+    e ann_fn r
   let void = failwith ""
   let vector = failwith ""
   let vector_ref = failwith ""
@@ -342,6 +346,14 @@ module R3_Collect_Pretty () = struct
   let global_value name = "(global-value " ^ name ^ ")"
 end
 
+module Ex0 (F : R3) = struct
+  open F
+  let res =
+    observe @@ program
+    @@ let* a = int 1 in
+       var a + int 2
+end
+
 module Ex1 (F : R3) = struct
   open F
 
@@ -369,3 +381,10 @@ let%expect_test "Ex1 test expose allocation" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {| Ex1: (program (has-type (let ([tmp4 (has-type (let ([tmp0 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 17 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 17) `Int)) `Void)]) (has-type (let ([tmp1 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp2 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 0 (has-type 1 `Int)) `Void)]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 1 (has-type t `Bool)) `Void)]) (has-type (var tmp1) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp5 (has-type (var tmp4) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 0 (has-type 42 `Int)) `Void)]) (has-type (let ([tmp7 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 1 (has-type f `Bool)) `Void)]) (has-type (vector-ref (has-type (var tmp4) `Vector ([`Int; `Bool])) 0) `Int)) `Int)) `Int)) `Int)) `Int)) |}]
+
+let%expect_test "Ex0 annotate types twice" =
+  let module M =
+    Ex0
+      (R3_Collect_Annotate_Types
+         (R3_Collect_Annotate_Types (R3_Collect_Pretty ()))) in
+  Format.printf "Ex1: %s\n" M.res
