@@ -49,7 +49,7 @@ let example : (int * (string * (float * unit))) OptionHList.hlist =
   OptionHList.[ Some 1; Some "hello"; Some 3.0 ]
 
 module type R3 = sig
-  include Chapter4.R2
+  include Chapter4.R2_Shrink
 
   module ExpHList : HLIST with type 'a el = 'a exp
 
@@ -83,8 +83,8 @@ end
 
 module StringMap = Chapter2_definitions.StringMap
 
-module R2_AnnotateTypes (F : Chapter4.R2) :
-  Chapter4.R2
+module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
+  Chapter4.R2_Shrink
     with type 'a var = 'a F.var
      and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
      and type 'a program = 'a F.program
@@ -139,14 +139,6 @@ module R2_AnnotateTypes (F : Chapter4.R2) :
     let _, els = els m in
     (t, F.if_ cond thn els)
 
-  let ( - ) e1 e2 m = bin_op F.( - ) e1 e2 m
-  let andd e1 e2 m = bin_op F.andd e1 e2 m
-  let orr e1 e2 m = bin_op F.orr e1 e2 m
-  let ( <> ) e1 e2 m = bool_op F.( <> ) e1 e2 m
-  let ( <= ) e1 e2 m = bool_op F.( <= ) e1 e2 m
-  let ( > ) e1 e2 m = bool_op F.( > ) e1 e2 m
-  let ( >= ) e1 e2 m = bool_op F.( >= ) e1 e2 m
-
   let program e =
     let _, e = e StringMap.empty in
     F.program e
@@ -159,7 +151,7 @@ module R3_Annotate_Types (F : R3) :
      and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
-  include R2_AnnotateTypes (F)
+  include R2_Shrink_AnnotateTypes (F)
   open R3_Types
   module ExpHList = HList (struct
     type 'a t = 'a exp
@@ -265,12 +257,12 @@ struct
 end
 
 module R3_Pretty () = struct
-  include Chapter4.R2_Pretty ()
+  include Chapter4.R2_Shrink_Pretty ()
   module ExpHList = HList (struct
     type 'a t = 'a exp
   end)
 
-  let void = "void"
+  let void = "(void)"
   let vector hl =
     let rec go : type r. r ExpHList.hlist -> string = function
       | ExpHList.(x :: xs) -> " " ^ x ^ go xs
@@ -317,4 +309,4 @@ let%expect_test "Ex1 test expose allocation" =
   let module M = Ex1 (ExposeAllocation (R3_Collect_Pretty ())) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
-    {| Ex1: (program (let ([tmp4 (let ([tmp0 (if (< (+ (global-value free_ptr) 17) (global-value fromspace_end)) void (collect 17))]) (let ([tmp1 (allocate 1 `Vector ([`Int; `Bool]))]) (let ([tmp2 (vector-set! (var tmp1) 0 1)]) (let ([tmp3 (vector-set! (var tmp1) 1 t)]) (var tmp1)))))]) (let ([tmp5 (var tmp4)]) (let ([tmp6 (vector-set! (var tmp5) 0 42)]) (let ([tmp7 (vector-set! (var tmp5) 1 f)]) (vector-ref (var tmp4) 0)))))) |}]
+    {| Ex1: (program (let ([tmp4 (let ([tmp0 (if (< (+ (global-value free_ptr) 17) (global-value fromspace_end)) (void) (collect 17))]) (let ([tmp1 (allocate 1 `Vector ([`Int; `Bool]))]) (let ([tmp2 (vector-set! (var tmp1) 0 1)]) (let ([tmp3 (vector-set! (var tmp1) 1 t)]) (var tmp1)))))]) (let ([tmp5 (var tmp4)]) (let ([tmp6 (vector-set! (var tmp5) 0 42)]) (let ([tmp7 (vector-set! (var tmp5) 1 f)]) (vector-ref (var tmp4) 0)))))) |}]
