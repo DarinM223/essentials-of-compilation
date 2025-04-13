@@ -253,8 +253,7 @@ struct
   include M.IDelta
 end
 
-module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
-  R2_Shrink with type 'a obs = unit C1.obs = struct
+module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
   include Chapter2_passes.ExplicateControl (F) (C1) ()
 
   let block_map : (string, unit C1.tail) Hashtbl.t = Hashtbl.create 100
@@ -281,23 +280,16 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () :
     | r -> var v r
 
   let t = function
-    | Tail -> C1.(return (arg t))
-    | Assign (v, body) -> C1.(assign v (arg t) @> body ())
     | Pred (t, _) -> t ()
+    | ctx -> convert_cond C1.(arg t) ctx
   let f = function
-    | Tail -> C1.(return (arg f))
-    | Assign (v, body) -> C1.(assign v (arg f) @> body ())
     | Pred (_, f) -> f ()
+    | ctx -> convert_cond C1.(arg f) ctx
   let not e = function
-    | Tail ->
-      let tmp = F.(string_of_var (fresh ())) in
-      e (Assign (tmp, fun () -> C1.(return (not (var (lookup tmp))))))
-    | Assign (v, body) ->
-      let tmp = F.(string_of_var (fresh ())) in
-      e
-        (Assign
-           (tmp, fun () -> C1.(assign v (not (var (lookup tmp))) @> body ())))
     | Pred (t, f) -> e (Pred (f, t))
+    | ctx ->
+      let tmp = F.(string_of_var (fresh ())) in
+      e (Assign (tmp, fun () -> convert_cond C1.(not (var (lookup tmp))) ctx))
   let ( = ) a b r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in

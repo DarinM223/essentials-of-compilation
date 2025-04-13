@@ -48,17 +48,6 @@ end)
 let example : (int * (string * (float * unit))) OptionHList.hlist =
   OptionHList.[ Some 1; Some "hello"; Some 3.0 ]
 
-module type R3 = sig
-  include Chapter4.R2_Shrink
-
-  module ExpHList : HLIST with type 'a el = 'a exp
-
-  val void : unit exp
-  val vector : 'tup ExpHList.hlist -> 'tup exp
-  val vector_ref : 'tup exp -> ('a, 'tup) ptr -> 'a exp
-  val vector_set : 'tup exp -> ('a, 'tup) ptr -> 'a exp -> unit exp
-end
-
 module R3_Types = struct
   (* Runtime representation of types for garbage collection.
      Uses polymorphic variants so it can be extended
@@ -79,6 +68,18 @@ module R3_Types = struct
     | `Void -> 0
     | `Vector ts ->
       8 + List.fold_left (fun acc t -> acc + allocation_size t) 0 ts
+end
+
+module type R3 = sig
+  include Chapter4.R2_Shrink
+
+  module ExpHList : HLIST with type 'a el = 'a exp
+
+  val has_type : 'a exp -> R3_Types.typ -> 'a exp
+  val void : unit exp
+  val vector : 'tup ExpHList.hlist -> 'tup exp
+  val vector_ref : 'tup exp -> ('a, 'tup) ptr -> 'a exp
+  val vector_set : 'tup exp -> ('a, 'tup) ptr -> 'a exp -> unit exp
 end
 
 module StringMap = Chapter2_definitions.StringMap
@@ -156,7 +157,30 @@ module R3_Annotate_Types (F : R3) :
   module ExpHList = HList (struct
     type 'a t = 'a exp
   end)
-  let void _ = (`Void, F.void)
+
+  (* Annotate types for R2 lacks the has_type form so we need to redefine all
+     the existing functions in R2 to use this form now.
+   *)
+  let ann_type f m =
+    let ty, e = f m in
+    (ty, F.has_type e ty)
+  let int i = ann_type (int i)
+  let read () = ann_type (read ())
+  let neg e = ann_type (neg e)
+  let ( + ) e1 e2 = ann_type (e1 + e2)
+  let var v = ann_type (var v)
+  let ( let* ) e f = ann_type (( let* ) e f)
+  let t = ann_type t
+  let f = ann_type f
+  let not e = ann_type (not e)
+  let ( = ) e1 e2 = ann_type (e1 = e2)
+  let ( < ) e1 e2 = ann_type (e1 < e2)
+  let if_ cond thn els = ann_type (if_ cond thn els)
+
+  let has_type e ty m =
+    let _, e = e m in
+    (ty, F.has_type e ty)
+  let void _ = (`Void, F.has_type F.void `Void)
   let vector hl m =
     let rec go : type a. a ExpHList.hlist -> typ list * a F.ExpHList.hlist =
       function
@@ -167,7 +191,7 @@ module R3_Annotate_Types (F : R3) :
       | ExpHList.[] -> ([], F.ExpHList.[])
     in
     let res_typs, res_es = go hl in
-    (`Vector res_typs, F.vector res_es)
+    (`Vector res_typs, F.has_type (F.vector res_es) (`Vector res_typs))
   let vector_ref e ptr m =
     let (t : typ), e = e m in
     let typs =
@@ -182,11 +206,12 @@ module R3_Annotate_Types (F : R3) :
       | _ :: typs, Next ptr -> index_typ typs ptr
       | [], _ -> failwith "Cannot get type from the index"
     in
-    (index_typ typs ptr, F.vector_ref e ptr)
+    let indexed_ty = index_typ typs ptr in
+    (indexed_ty, F.has_type (F.vector_ref e ptr) indexed_ty)
   let vector_set e ptr v m =
     let _, e = e m in
     let _, v = v m in
-    (`Void, F.vector_set e ptr v)
+    (`Void, F.has_type (F.vector_set e ptr v) `Void)
 end
 
 module type R3_Collect = sig
@@ -203,9 +228,9 @@ module R3_Collect_Annotate_Types (F : R3_Collect) :
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include R3_Annotate_Types (F)
-  let collect i _ = (`Int, F.collect i)
-  let allocate i ty _ = (ty, F.allocate i ty)
-  let global_value name _ = (`Int, F.global_value name)
+  let collect i _ = (`Int, F.has_type (F.collect i) `Int)
+  let allocate i ty _ = (ty, F.has_type (F.allocate i ty) ty)
+  let global_value name _ = (`Int, F.has_type (F.global_value name) `Int)
 end
 
 module ExposeAllocation (F : R3_Collect) : R3 with type 'a obs = 'a F.obs =
@@ -256,12 +281,46 @@ struct
     exp m
 end
 
+module type C2 = sig
+  include Chapter4.C1
+  val allocate : int -> R3_Types.typ -> 'a exp
+  val vector_ref : 'tup arg -> ('a, 'tup) ptr -> 'a exp
+  val vector_set : 'tup arg -> ('a, 'tup) ptr -> 'a arg -> unit exp
+  val global_value : string -> int exp
+  val void : unit exp
+
+  val collect : int -> unit stmt
+end
+
+module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
+  include Chapter4.ExplicateControl (F) (C2) ()
+  module ExpHList = HList (struct
+    type 'a t = 'a exp
+  end)
+
+  let void = failwith ""
+  let vector = failwith ""
+  let vector_ref = failwith ""
+  let vector_set = failwith ""
+  let collect = failwith ""
+  let allocate = failwith ""
+  let global_value = failwith ""
+  (* val void : unit exp
+  val vector : 'tup ExpHList.hlist -> 'tup exp
+  val vector_ref : 'tup exp -> ('a, 'tup) ptr -> 'a exp
+  val vector_set : 'tup exp -> ('a, 'tup) ptr -> 'a exp -> unit exp *)
+  (* val collect : int -> unit exp
+  val allocate : int -> R3_Types.typ -> 'a exp
+  val global_value : string -> int exp *)
+end
+
 module R3_Pretty () = struct
   include Chapter4.R2_Shrink_Pretty ()
   module ExpHList = HList (struct
     type 'a t = 'a exp
   end)
 
+  let has_type e ty = "(has-type " ^ e ^ " " ^ R3_Types.show_typ ty ^ ")"
   let void = "(void)"
   let vector hl =
     let rec go : type r. r ExpHList.hlist -> string = function
@@ -309,4 +368,4 @@ let%expect_test "Ex1 test expose allocation" =
   let module M = Ex1 (ExposeAllocation (R3_Collect_Pretty ())) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
-    {| Ex1: (program (let ([tmp4 (let ([tmp0 (if (< (+ (global-value free_ptr) 17) (global-value fromspace_end)) (void) (collect 17))]) (let ([tmp1 (allocate 1 `Vector ([`Int; `Bool]))]) (let ([tmp2 (vector-set! (var tmp1) 0 1)]) (let ([tmp3 (vector-set! (var tmp1) 1 t)]) (var tmp1)))))]) (let ([tmp5 (var tmp4)]) (let ([tmp6 (vector-set! (var tmp5) 0 42)]) (let ([tmp7 (vector-set! (var tmp5) 1 f)]) (vector-ref (var tmp4) 0)))))) |}]
+    {| Ex1: (program (has-type (let ([tmp4 (has-type (let ([tmp0 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 17 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 17) `Int)) `Void)]) (has-type (let ([tmp1 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp2 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 0 (has-type 1 `Int)) `Void)]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 1 (has-type t `Bool)) `Void)]) (has-type (var tmp1) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp5 (has-type (var tmp4) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 0 (has-type 42 `Int)) `Void)]) (has-type (let ([tmp7 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 1 (has-type f `Bool)) `Void)]) (has-type (vector-ref (has-type (var tmp4) `Vector ([`Int; `Bool])) 0) `Int)) `Int)) `Int)) `Int)) `Int)) |}]
