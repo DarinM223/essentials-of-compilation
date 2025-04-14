@@ -429,6 +429,28 @@ module Ex2 (F : R3) = struct
          Here
 end
 
+module Ex3 (F : R3Let) = struct
+  open F
+
+  let res =
+    observe @@ program
+    @@
+    let* v =
+      vector
+        ExpHList.
+          [
+            (let* a = int 1 in
+             var a + int 2);
+          ]
+    in
+    let* _ =
+      vector_set (var v) Here
+        (let* b = int 2 in
+         var b + int 1)
+    in
+    vector_ref (var v) Here
+end
+
 let%expect_test "Ex1 test expose allocation" =
   let module M = Ex1 (TransformLet (ExposeAllocation (R3_Collect_Pretty ()))) in
   Format.printf "Ex1: %s\n" M.res;
@@ -441,6 +463,16 @@ let%expect_test "Ex0 annotate types twice" =
       (TransformLet
          (R3_Collect_Annotate_Types
             (R3_Collect_Annotate_Types (R3_Collect_Pretty ())))) in
-  Format.printf "Ex1: %s\n" M.res;
+  Format.printf "Ex0: %s\n" M.res;
   [%expect
-    {| Ex1: (program (has-type (let ([tmp0 (has-type 1 `Int)]) (has-type (+ (has-type (var tmp0) `Int) (has-type 2 `Int)) `Int)) `Int)) |}]
+    {| Ex0: (program (has-type (let ([tmp0 (has-type 1 `Int)]) (has-type (+ (has-type (var tmp0) `Int) (has-type 2 `Int)) `Int)) `Int)) |}]
+
+let%expect_test "Ex3 annotate types twice" =
+  let module M =
+    Ex3
+      (TransformLet
+         (R3_Annotate_Types
+            (ExposeAllocation (R3_Collect_Annotate_Types (R3_Collect_Pretty ()))))) in
+  Format.printf "Ex3: %s\n" M.res;
+  [%expect
+    {| Ex3: (program (has-type (let ([tmp1 (has-type (let ([tmp6 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 16 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 16) `Int)) `Void)]) (has-type (let ([tmp4 (has-type (allocate 1 `Vector ([`Int])) `Vector ([`Int]))]) (has-type (let ([tmp5 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int])) 0 (has-type (let ([tmp0 (has-type 1 `Int)]) (has-type (+ (has-type (var tmp0) `Int) (has-type 2 `Int)) `Int)) `Int)) `Void)]) (has-type (var tmp4) `Vector ([`Int]))) `Vector ([`Int]))) `Vector ([`Int]))) `Vector ([`Int]))]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int])) 0 (has-type (let ([tmp2 (has-type 2 `Int)]) (has-type (+ (has-type (var tmp2) `Int) (has-type 1 `Int)) `Int)) `Int)) `Void)]) (has-type (vector-ref (has-type (var tmp1) `Vector ([`Int])) 0) `Int)) `Int)) `Int)) |}]
