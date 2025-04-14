@@ -463,7 +463,7 @@ let%expect_test "Example 6 explicate control" =
     Ex6 (TransformLet (ExplicateControl (R1_Pretty ()) (C0_Pretty) ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
-    {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp1 20) (seq (assign tmp4 22) (seq (assign tmp0 (+ tmp1 tmp4)) (return tmp0)))))) |}]
+    {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp0 20) (seq (assign tmp1 22) (seq (assign tmp2 (+ tmp0 tmp1)) (return tmp2)))))) |}]
 
 let%expect_test "Example 6 uncover locals" =
   let module M =
@@ -472,7 +472,7 @@ let%expect_test "Example 6 uncover locals" =
          (ExplicateControl (R1_Pretty ()) (UncoverLocals (C0_Pretty)) ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
-    {| Ex6: (program ((locals . (tmp0 tmp1 tmp4))) ((start . (seq (assign tmp1 20) (seq (assign tmp4 22) (seq (assign tmp0 (+ tmp1 tmp4)) (return tmp0)))))) |}]
+    {| Ex6: (program ((locals . (tmp0 tmp1 tmp2))) ((start . (seq (assign tmp0 20) (seq (assign tmp1 22) (seq (assign tmp2 (+ tmp0 tmp1)) (return tmp2)))))) |}]
 
 let%expect_test "Example 6 select instructions" =
   let module M =
@@ -486,11 +486,11 @@ let%expect_test "Example 6 select instructions" =
   [%expect
     {|
     Ex6: (program () (start . (block ()
-    (movq (int 20) (var tmp1))
-    (movq (int 22) (var tmp4))
-    (movq (var tmp1) (var tmp0))
-    (addq (var tmp4) (var tmp0))
-    (movq (var tmp0) (reg rax))
+    (movq (int 20) (var tmp0))
+    (movq (int 22) (var tmp1))
+    (movq (var tmp0) (var tmp2))
+    (addq (var tmp1) (var tmp2))
+    (movq (var tmp2) (reg rax))
     (retq))))
     |}]
 

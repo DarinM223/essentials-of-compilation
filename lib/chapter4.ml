@@ -776,8 +776,8 @@ let%expect_test "Explicate control with conditional that creates blocks" =
   [%expect
     {|
     Ex5: (program ((locals . ())) ((start . (seq (assign tmp0 1) (seq (assign tmp10 5) (if (< tmp0 tmp10) block_t2 block_f3))))
-    (block_t0 . (seq (assign tmp1 5) (seq (assign tmp2 6) (return (+ tmp1 tmp2)))))
-    (block_f1 . (seq (assign tmp6 1) (seq (assign tmp5 (neg tmp6)) (return (+ tmp0 tmp5)))))
+    (block_t0 . (seq (assign tmp2 5) (seq (assign tmp3 6) (return (+ tmp2 tmp3)))))
+    (block_f1 . (seq (assign tmp6 1) (seq (assign tmp1 (neg tmp6)) (return (+ tmp0 tmp1)))))
     (block_t2 . (goto block_t0))
     (block_f3 . (goto block_f1)))
     |}]
