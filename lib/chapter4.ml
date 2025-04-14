@@ -22,6 +22,11 @@ module type R2 = sig
   val ( >= ) : int exp -> int exp -> bool exp
 end
 
+module type R2Let = sig
+  include R2
+  val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
+end
+
 module R2_Shrink_T
     (X_exp : Chapter1.TRANS)
     (X_program : Chapter1.TRANS)
@@ -38,6 +43,25 @@ struct
   let ( = ) a b = fwd F.(bwd a = bwd b)
   let ( < ) a b = fwd F.(bwd a < bwd b)
   let if_ a b c = fwd @@ F.if_ (bwd a) (bwd b) (bwd c)
+end
+
+module R2_T
+    (X_exp : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      R2
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include R2_Shrink_T (X_exp) (X_program) (F)
+  open X_exp
+  let ( - ) a b = fwd F.(bwd a - bwd b)
+  let andd a b = fwd @@ F.andd (bwd a) (bwd b)
+  let orr a b = fwd @@ F.orr (bwd a) (bwd b)
+  let ( <> ) a b = fwd F.(bwd a <> bwd b)
+  let ( <= ) a b = fwd F.(bwd a <= bwd b)
+  let ( > ) a b = fwd F.(bwd a > bwd b)
+  let ( >= ) a b = fwd F.(bwd a >= bwd b)
 end
 
 module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
@@ -227,6 +251,21 @@ module X86_1_Printer = struct
     in
     jmp_instr ^ " " ^ l
   let label l = l ^ ":"
+end
+
+module TransformLet (F : R2) :
+  R2Let
+    with type 'a exp = 'a F.exp
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  module X_exp = Chapter1.MkId (struct
+    type 'a t = 'a F.exp
+  end)
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
+  include R2_T (X_exp) (X_program) (F)
+  include Chapter2_definitions.TransformLet (F)
 end
 
 module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
@@ -583,7 +622,7 @@ struct
   include M.IDelta
 end
 
-module Ex1 (F : R2) = struct
+module Ex1 (F : R2Let) = struct
   open F
 
   let res =
@@ -630,7 +669,7 @@ module PatchInstructions (F : X86_1) = struct
   include M.IDelta
 end
 
-module Ex2 (F : R2) = struct
+module Ex2 (F : R2Let) = struct
   open F
   let res =
     observe @@ program
@@ -639,7 +678,7 @@ module Ex2 (F : R2) = struct
     if_ (var a < int 5) (var a + int 1) (int 6 + int 7)
 end
 
-module Ex3 (F : R2) = struct
+module Ex3 (F : R2Let) = struct
   open F
   let res =
     observe @@ program
@@ -647,7 +686,7 @@ module Ex3 (F : R2) = struct
        var a < int 5
 end
 
-module Ex4 (F : R2) = struct
+module Ex4 (F : R2Let) = struct
   open F
   let res =
     observe @@ program
@@ -656,7 +695,7 @@ module Ex4 (F : R2) = struct
        var b
 end
 
-module Ex5 (F : R2) = struct
+module Ex5 (F : R2Let) = struct
   open F
   let res =
     observe @@ program
@@ -670,7 +709,7 @@ module Ex5 (F : R2) = struct
       (var a + neg (int 1))
 end
 
-module Ex6 (F : R2) = struct
+module Ex6 (F : R2Let) = struct
   open F
   let res =
     observe @@ program
@@ -693,13 +732,13 @@ module Ex6 (F : R2) = struct
 end
 
 let%expect_test "Example 1 shrink" =
-  let module M = Ex1 (Shrink (R2_Shrink_Pretty ())) in
+  let module M = Ex1 (TransformLet (Shrink (R2_Shrink_Pretty ()))) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {| Ex1: (program (let ([tmp0 2]) (let ([tmp1 (read)]) (if (if (not (< 5 (var tmp0))) (< (var tmp0) (var tmp1)) f) (+ (var tmp1) (- (var tmp0))) (+ (var tmp1) (var tmp0)))))) |}]
 
 let%expect_test "Remove complex with simple conditional" =
-  let module M = Ex2 (Shrink (RemoveComplex (R2_Shrink_Pretty ()))) in
+  let module M = Ex2 (TransformLet (Shrink (RemoveComplex (R2_Shrink_Pretty ())))) in
   Format.printf "Ex2: %s\n" M.res;
   [%expect
     {| Ex2: (program (let ([tmp0 2]) (if (< (var tmp0) 5) (+ (var tmp0) 1) (+ 6 7)))) |}]
@@ -707,8 +746,10 @@ let%expect_test "Remove complex with simple conditional" =
 let%expect_test "Explicate control with simple conditional" =
   let module M =
     Ex3
-      (Shrink
-         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ())))) in
   Format.printf "Ex3: %s\n" M.res;
   [%expect
     {| Ex3: (program ((locals . ())) ((start . (seq (assign tmp0 2) (seq (assign tmp2 5) (return (< tmp0 tmp2)))))) |}]
@@ -716,8 +757,10 @@ let%expect_test "Explicate control with simple conditional" =
 let%expect_test "Explicate control with assignment to conditional" =
   let module M =
     Ex4
-      (Shrink
-         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ())))) in
   Format.printf "Ex4: %s\n" M.res;
   [%expect
     {| Ex4: (program ((locals . ())) ((start . (seq (assign tmp0 1) (seq (assign tmp4 5) (seq (assign tmp2 (< tmp0 tmp4)) (seq (assign tmp1 (not tmp2)) (return tmp1))))))) |}]
@@ -725,8 +768,10 @@ let%expect_test "Explicate control with assignment to conditional" =
 let%expect_test "Explicate control with conditional that creates blocks" =
   let module M =
     Ex5
-      (Shrink
-         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ())))) in
   Format.printf "Ex5: %s\n" M.res;
   [%expect
     {|
@@ -740,8 +785,10 @@ let%expect_test "Explicate control with conditional that creates blocks" =
 let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
   let module M =
     Ex6
-      (Shrink
-         (RemoveComplex (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl (R2_Shrink_Pretty ()) (C1_Pretty) ())))) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -765,12 +812,13 @@ let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
 let%expect_test "Select instructions" =
   let module M =
     Ex6
-      (Shrink
-         (RemoveComplex
-            (ExplicateControl
-               (R2_Shrink_Pretty ())
-               (SelectInstructions (C1_Pretty) (X86_1_Pretty))
-               ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl
+                  (R2_Shrink_Pretty ())
+                  (SelectInstructions (C1_Pretty) (X86_1_Pretty))
+                  ())))) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -841,12 +889,13 @@ let%expect_test "Select instructions" =
 let%expect_test "Uncover live" =
   let module M =
     Ex6
-      (Shrink
-         (RemoveComplex
-            (ExplicateControl
-               (R2_Shrink_Pretty ())
-               (SelectInstructions (C1_Pretty) (UncoverLive (X86_1_Pretty)))
-               ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl
+                  (R2_Shrink_Pretty ())
+                  (SelectInstructions (C1_Pretty) (UncoverLive (X86_1_Pretty)))
+                  ())))) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -922,17 +971,19 @@ let%expect_test "Uncover live" =
 let%expect_test "Allocate Registers" =
   let module M =
     Ex6
-      (Shrink
-         (RemoveComplex
-            (ExplicateControl
-               (R2_Shrink_Pretty ())
-               (SelectInstructions
-                  (C1_Pretty)
-                  (UncoverLive
-                     (BuildInterference
-                        (BuildMoves
-                           (AllocateRegisters (PatchInstructions (X86_1_Printer)))))))
-               ()))) in
+      (TransformLet
+         (Shrink
+            (RemoveComplex
+               (ExplicateControl
+                  (R2_Shrink_Pretty ())
+                  (SelectInstructions
+                     (C1_Pretty)
+                     (UncoverLive
+                        (BuildInterference
+                           (BuildMoves
+                              (AllocateRegisters
+                                 (PatchInstructions (X86_1_Printer)))))))
+                  ())))) in
   print_endline M.res;
   [%expect
     {|

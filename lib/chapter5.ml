@@ -82,6 +82,11 @@ module type R3 = sig
   val vector_set : 'tup exp -> ('a, 'tup) ptr -> 'a exp -> unit exp
 end
 
+module type R3Let = sig
+  include R3
+  val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
+end
+
 module StringMap = Chapter2_definitions.StringMap
 
 module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
@@ -114,18 +119,10 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
   let var v m = (StringMap.find (F.string_of_var v) m, F.var v)
   let fresh = F.fresh
   let string_of_var = F.string_of_var
-  let ( let* ) e f m =
+  let lett v e b m =
     let typ, e = e m in
-    let result_typ : (unit -> typ) ref =
-      ref (fun () -> failwith "Cannot get type from let expression")
-    in
-    let result =
-      F.( let* ) e (fun v ->
-          let typ, e = f v (StringMap.add (F.string_of_var v) typ m) in
-          (result_typ := fun () -> typ);
-          e)
-    in
-    (!result_typ (), result)
+    let result_typ, b = b (StringMap.add (F.string_of_var v) typ m) in
+    (result_typ, F.lett v e b)
 
   let t _ = (`Bool, F.t)
   let f _ = (`Bool, F.f)
@@ -169,7 +166,7 @@ module R3_Annotate_Types (F : R3) :
   let neg e = ann_type (neg e)
   let ( + ) e1 e2 = ann_type (e1 + e2)
   let var v = ann_type (var v)
-  let ( let* ) e f = ann_type (( let* ) e f)
+  let lett v e b = ann_type (lett v e b)
   let t = ann_type t
   let f = ann_type f
   let not e = ann_type (not e)
@@ -233,6 +230,61 @@ module R3_Collect_Annotate_Types (F : R3_Collect) :
   let global_value name _ = (`Int, F.has_type (F.global_value name) `Int)
 end
 
+module R3_T
+    (X_exp : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      R3
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include Chapter4.R2_Shrink_T (X_exp) (X_program) (F)
+  open X_exp
+  module ExpHList = HList (struct
+    type 'a t = 'a exp
+  end)
+  let has_type e t = fwd @@ F.has_type (bwd e) t
+  let void = fwd F.void
+  let vector hl =
+    let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
+      | ExpHList.(x :: xs) -> F.ExpHList.(bwd x :: go xs)
+      | ExpHList.[] -> F.ExpHList.[]
+    in
+    fwd @@ F.vector @@ go hl
+  let vector_ref e ptr = fwd @@ F.vector_ref (bwd e) ptr
+  let vector_set e ptr v = fwd @@ F.vector_set (bwd e) ptr (bwd v)
+end
+
+module TransformLet (F : R3) :
+  R3Let
+    with type 'a exp = 'a F.exp
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  module X_exp = Chapter1.MkId (struct
+    type 'a t = 'a F.exp
+  end)
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
+  include R3_T (X_exp) (X_program) (F)
+  include Chapter2_definitions.TransformLet (F)
+end
+
+module R3_Collect_T
+    (X_exp : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      R3_Collect
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include R3_T (X_exp) (X_program) (F)
+  open X_exp
+  let collect i = fwd @@ F.collect i
+  let allocate i ty = fwd @@ F.allocate i ty
+  let global_value name = fwd @@ F.global_value name
+end
+
 module ExposeAllocation (F : R3_Collect) : R3 with type 'a obs = 'a F.obs =
 struct
   include R3_Collect_Annotate_Types (F)
@@ -254,12 +306,13 @@ struct
     let ty = `Vector vtys in
     let ty_size = R3_Types.allocation_size ty in
     let exp =
-      let* _ =
-        if_
-          (global_value "free_ptr" + int ty_size < global_value "fromspace_end")
-          void (collect ty_size)
-      in
-      let* alloc : tup var = allocate 1 ty in
+      let alloc = fresh () in
+      lett (fresh ())
+        (if_
+           (global_value "free_ptr" + int ty_size < global_value "fromspace_end")
+           void (collect ty_size))
+      @@ lett alloc (allocate 1 ty)
+      @@
       (* For every field set to the corresponding expression with vector_set *)
       let rec go : type r a.
           R3_Types.typ list -> r F.ExpHList.hlist -> (a, tup) ptr -> tup exp =
@@ -267,15 +320,15 @@ struct
         match (tys, hl) with
         | ty :: tys, F.ExpHList.(e :: es) ->
           let ptr = Obj.magic @@ Next ptr in
-          let* _ = vector_set (var alloc) ptr (fun _ -> (ty, e)) in
-          go tys es ptr
+          lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
+          @@ go tys es ptr
         | _ -> var alloc
       in
       match (vtys, ves) with
       | ty :: tys, F.ExpHList.(e :: es) ->
         let ptr = Here in
-        let* _ = vector_set (var alloc) ptr (fun _ -> (ty, e)) in
-        go tys es ptr
+        lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
+        @@ go tys es ptr
       | _ -> var alloc
     in
     exp m
@@ -346,7 +399,7 @@ module R3_Collect_Pretty () = struct
   let global_value name = "(global-value " ^ name ^ ")"
 end
 
-module Ex0 (F : R3) = struct
+module Ex0 (F : R3Let) = struct
   open F
   let res =
     observe @@ program
@@ -354,7 +407,7 @@ module Ex0 (F : R3) = struct
        var a + int 2
 end
 
-module Ex1 (F : R3) = struct
+module Ex1 (F : R3Let) = struct
   open F
 
   let res =
@@ -377,7 +430,7 @@ module Ex2 (F : R3) = struct
 end
 
 let%expect_test "Ex1 test expose allocation" =
-  let module M = Ex1 (ExposeAllocation (R3_Collect_Pretty ())) in
+  let module M = Ex1 (TransformLet (ExposeAllocation (R3_Collect_Pretty ()))) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {| Ex1: (program (has-type (let ([tmp4 (has-type (let ([tmp0 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 17 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 17) `Int)) `Void)]) (has-type (let ([tmp1 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp2 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 0 (has-type 1 `Int)) `Void)]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 1 (has-type t `Bool)) `Void)]) (has-type (var tmp1) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp5 (has-type (var tmp4) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 0 (has-type 42 `Int)) `Void)]) (has-type (let ([tmp7 (has-type (vector-set! (has-type (var tmp5) `Vector ([`Int; `Bool])) 1 (has-type f `Bool)) `Void)]) (has-type (vector-ref (has-type (var tmp4) `Vector ([`Int; `Bool])) 0) `Int)) `Int)) `Int)) `Int)) `Int)) |}]
@@ -385,6 +438,7 @@ let%expect_test "Ex1 test expose allocation" =
 let%expect_test "Ex0 annotate types twice" =
   let module M =
     Ex0
-      (R3_Collect_Annotate_Types
-         (R3_Collect_Annotate_Types (R3_Collect_Pretty ()))) in
+      (TransformLet
+         (R3_Collect_Annotate_Types
+            (R3_Collect_Annotate_Types (R3_Collect_Pretty ())))) in
   Format.printf "Ex1: %s\n" M.res

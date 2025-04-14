@@ -16,7 +16,7 @@ module RemoveComplexPass (F : R1) = struct
   end)
   open X
   module IDelta = struct
-    let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
+    let lett v e b = fwd @@ F.lett v (bwd e) (bwd b)
 
     let var v = (Simple, F.var v)
     let int i = (Simple, F.int i)
@@ -25,8 +25,8 @@ module RemoveComplexPass (F : R1) = struct
       match ann with
       | Simple -> (Complex, F.neg e)
       | Complex ->
-        let* tmp = (ann, e) in
-        (Complex, F.neg (F.var tmp))
+        let tmp = F.fresh () in
+        lett tmp (ann, e) (Complex, F.neg (F.var tmp))
     type _ eff += Normalize : ann * 'a from -> 'a from eff
     let ( + ) (ann1, e1) (ann2, e2) =
       try
@@ -42,8 +42,8 @@ module RemoveComplexPass (F : R1) = struct
         in
         (Complex, F.(e1 + e2))
       with effect Normalize (ann, e), k ->
-        let* tmp = (ann, e) in
-        Effect.Deep.continue k (F.var tmp)
+        let tmp = F.fresh () in
+        lett tmp (ann, e) (Effect.Deep.continue k (F.var tmp))
   end
 end
 
@@ -107,9 +107,7 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
       body ()
     | Pred _ -> failwith "Predicate for var not handled yet"
 
-  let ( let* ) e f m r =
-    let tmp = F.fresh () in
-    e m (Assign (F.string_of_var tmp, fun () -> f tmp ann_id r))
+  let lett v e b m r = e m (Assign (F.string_of_var v, fun () -> b ann_id r))
 
   let program e () = C0.(program (info []) [ ("start", e ann_id Tail) ])
 
@@ -418,7 +416,7 @@ module Ex4 (F : R1) = struct
   let res = observe @@ program (int 52 + neg (int 10))
 end
 
-module Ex5 (F : R1) = struct
+module Ex5 (F : R1Let) = struct
   open F
   let res =
     observe @@ program
@@ -428,7 +426,7 @@ module Ex5 (F : R1) = struct
     var b
 end
 
-module Ex6 (F : R1) = struct
+module Ex6 (F : R1Let) = struct
   open F
 
   let res =
@@ -449,7 +447,7 @@ let%expect_test "Example 4 remove complex" =
   [%expect {| Ex4: (program (let ([tmp0 (- 10)]) (+ 52 (var tmp0)))) |}]
 
 let%expect_test "Example 5 remove complex" =
-  let module M = Ex5 (RemoveComplex (R1_Pretty ())) in
+  let module M = Ex5 (TransformLet (RemoveComplex (R1_Pretty ()))) in
   Format.printf "Ex5: %s\n" M.res;
   [%expect
     {| Ex5: (program (let ([tmp0 42]) (let ([tmp1 (var tmp0)]) (var tmp1)))) |}]
@@ -461,14 +459,17 @@ let%expect_test "C0 example 1 pretty printing" =
     {| C0 Ex1: (program ((locals . ())) ((start . (seq (assign x_1 20) (seq (assign x_2 22) (seq (assign y (+ x_1 x_2)) (return y)))))) |}]
 
 let%expect_test "Example 6 explicate control" =
-  let module M = Ex6 (ExplicateControl (R1_Pretty ()) (C0_Pretty) ()) in
+  let module M =
+    Ex6 (TransformLet (ExplicateControl (R1_Pretty ()) (C0_Pretty) ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {| Ex6: (program ((locals . ())) ((start . (seq (assign tmp1 20) (seq (assign tmp4 22) (seq (assign tmp0 (+ tmp1 tmp4)) (return tmp0)))))) |}]
 
 let%expect_test "Example 6 uncover locals" =
   let module M =
-    Ex6 (ExplicateControl (R1_Pretty ()) (UncoverLocals (C0_Pretty)) ()) in
+    Ex6
+      (TransformLet
+         (ExplicateControl (R1_Pretty ()) (UncoverLocals (C0_Pretty)) ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {| Ex6: (program ((locals . (tmp0 tmp1 tmp4))) ((start . (seq (assign tmp1 20) (seq (assign tmp4 22) (seq (assign tmp0 (+ tmp1 tmp4)) (return tmp0)))))) |}]
@@ -476,10 +477,11 @@ let%expect_test "Example 6 uncover locals" =
 let%expect_test "Example 6 select instructions" =
   let module M =
     Ex6
-      (ExplicateControl
-         (R1_Pretty ())
-         (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))
-         ()) in
+      (TransformLet
+         (ExplicateControl
+            (R1_Pretty ())
+            (SelectInstructions (UncoverLocals (C0_Pretty)) (X86_0_Pretty))
+            ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -495,11 +497,12 @@ let%expect_test "Example 6 select instructions" =
 let%expect_test "Example 6 assign homes" =
   let module M =
     Ex6
-      (ExplicateControl
-         (R1_Pretty ())
-         (SelectInstructions
-            (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))
-         ()) in
+      (TransformLet
+         (ExplicateControl
+            (R1_Pretty ())
+            (SelectInstructions
+               (UncoverLocals (C0_Pretty)) (AssignHomes (X86_0_Pretty)))
+            ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -515,13 +518,14 @@ let%expect_test "Example 6 assign homes" =
 let%expect_test "Example 6 patch instructions" =
   let module M =
     Ex6
-      (ExplicateControl
-         (R1_Pretty ())
-         (SelectInstructions
-            (UncoverLocals
-               (C0_Pretty))
-               (AssignHomes (PatchInstructions (X86_0_Pretty))))
-         ()) in
+      (TransformLet
+         (ExplicateControl
+            (R1_Pretty ())
+            (SelectInstructions
+               (UncoverLocals
+                  (C0_Pretty))
+                  (AssignHomes (PatchInstructions (X86_0_Pretty))))
+            ())) in
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
@@ -539,13 +543,14 @@ let%expect_test "Example 6 patch instructions" =
 let%expect_test "Example 6 final printed X86" =
   let module M =
     Ex6
-      (ExplicateControl
-         (R1_Pretty ())
-         (SelectInstructions
-            (UncoverLocals
-               (C0_Pretty))
-               (AssignHomes (PatchInstructions (X86_0_Printer))))
-         ()) in
+      (TransformLet
+         (ExplicateControl
+            (R1_Pretty ())
+            (SelectInstructions
+               (UncoverLocals
+                  (C0_Pretty))
+                  (AssignHomes (PatchInstructions (X86_0_Printer))))
+            ())) in
   Format.printf "%s\n" M.res;
   [%expect
     {|

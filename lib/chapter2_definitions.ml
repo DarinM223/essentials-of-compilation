@@ -5,6 +5,11 @@ module type R1 = sig
   val var : 'a var -> 'a exp
   val fresh : unit -> 'a var
   val string_of_var : 'a var -> string
+  val lett : 'a var -> 'a exp -> 'b exp -> 'b exp
+end
+
+module type R1Let = sig
+  include R1
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
 
@@ -26,7 +31,25 @@ module R1_T
   let string_of_var = F.string_of_var
   let var v = fwd @@ F.var v
   let fresh = F.fresh
-  let ( let* ) e f = fwd @@ F.( let* ) (bwd e) (fun v -> bwd (f v))
+  let lett v e b = fwd @@ F.lett v (bwd e) (bwd b)
+end
+
+module TransformLet (F : R1) :
+  R1Let
+    with type 'a exp = 'a F.exp
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  module X_exp = Chapter1.MkId (struct
+    type 'a t = 'a F.exp
+  end)
+  module X_program = Chapter1.MkId (struct
+    type 'a t = 'a F.program
+  end)
+  include R1_T (X_exp) (X_program) (F)
+  let ( let* ) e f =
+    let var = fresh () in
+    let body = f var in
+    F.lett var e body
 end
 
 module R1_R_T (R : Chapter1.Reader) (F : R1) :
@@ -41,7 +64,7 @@ module R1_R_T (R : Chapter1.Reader) (F : R1) :
   let var v _ = F.var v
   let string_of_var = F.string_of_var
   let fresh = F.fresh
-  let ( let* ) e f r = F.( let* ) (e r) (fun v -> f v r)
+  let lett v e b r = F.lett v (e r) (b r)
 end
 
 module R1_Partial (F : R1) : R1 with type 'a obs = 'a F.program = struct
@@ -62,9 +85,7 @@ module R1_Pretty () = struct
       incr c;
       "tmp" ^ string_of_int !c
 
-  let ( let* ) e f =
-    let v = fresh () in
-    "(let ([" ^ v ^ " " ^ e ^ "]) " ^ f v ^ ")"
+  let lett v e b = "(let ([" ^ v ^ " " ^ e ^ "]) " ^ b ^ ")"
 end
 
 module type C0 = sig
@@ -464,7 +485,7 @@ module X86_0_Pretty = struct
   let observe s = s
 end
 
-module Ex1 (F : R1) = struct
+module Ex1 (F : R1Let) = struct
   open F
 
   let res =
@@ -474,7 +495,7 @@ module Ex1 (F : R1) = struct
     int 10 + var x
 end
 
-module Ex2 (F : R1) = struct
+module Ex2 (F : R1Let) = struct
   open F
 
   let res =
@@ -494,7 +515,7 @@ module Ex2 (F : R1) = struct
     + var x1
 end
 
-module Ex3 (F : R1) = struct
+module Ex3 (F : R1Let) = struct
   open F
   let res =
     observe @@ program
@@ -520,7 +541,7 @@ module C0_Ex1 (F : C0) = struct
 end
 
 let%expect_test "Example 3 with partial evaluation" =
-  let module M = Ex3 (R1_Pretty ()) in
+  let module M = Ex3 (TransformLet (R1_Pretty ())) in
   Format.printf "Ex3 pretty: %s\n" M.res;
   [%expect
     {| Ex3 pretty: (program (let ([tmp0 (read)]) (let ([tmp1 (read)]) (+ (var tmp0) (- (var tmp1)))))) |}]
