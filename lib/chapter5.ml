@@ -355,20 +355,32 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   let has_type e ty _ r =
     let ann_fn = { f = (fun exp -> C2.has_type exp ty) } in
     e ann_fn r
-  let void = failwith ""
-  let vector = failwith ""
-  let vector_ref = failwith ""
-  let vector_set = failwith ""
-  let collect = failwith ""
-  let allocate = failwith ""
-  let global_value = failwith ""
-  (* val void : unit exp
-  val vector : 'tup ExpHList.hlist -> 'tup exp
-  val vector_ref : 'tup exp -> ('a, 'tup) ptr -> 'a exp
-  val vector_set : 'tup exp -> ('a, 'tup) ptr -> 'a exp -> unit exp *)
-  (* val collect : int -> unit exp
-  val allocate : int -> R3_Types.typ -> 'a exp
-  val global_value : string -> int exp *)
+  let void = convert_exp C2.void
+  let vector =
+    failwith "vector should have been eliminated before explicate control"
+  let vector_ref e ptr m r =
+    let tmp = F.(string_of_var (fresh ())) in
+    e ann_id
+      (Assign
+         (tmp, fun () -> convert_exp C2.(vector_ref (var (lookup tmp)) ptr) m r))
+  let vector_set e ptr v m r =
+    let tmp1 = F.(string_of_var (fresh ())) in
+    let tmp2 = F.(string_of_var (fresh ())) in
+    e ann_id
+      (Assign
+         ( tmp1,
+           fun () ->
+             v ann_id
+               (Assign
+                  ( tmp2,
+                    fun () ->
+                      convert_exp
+                        C2.(
+                          vector_set (var (lookup tmp1)) ptr (var (lookup tmp2)))
+                        m r )) ))
+  let collect i _ _ = C2.collect i
+  let allocate i ty = convert_exp (C2.allocate i ty)
+  let global_value name = convert_exp (C2.global_value name)
 end
 
 module R3_Pretty () = struct
