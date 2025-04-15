@@ -8,7 +8,7 @@ module type R1 = sig
   val lett : 'a var -> 'a exp -> 'b exp -> 'b exp
 end
 
-module type R1Let = sig
+module type R1_Let = sig
   include R1
   val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
 end
@@ -35,7 +35,7 @@ module R1_T
 end
 
 module TransformLet (F : R1) :
-  R1Let
+  R1_Let
     with type 'a exp = 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
@@ -485,7 +485,7 @@ module X86_0_Pretty = struct
   let observe s = s
 end
 
-module Ex1 (F : R1Let) = struct
+module Ex1 (F : R1_Let) = struct
   open F
 
   let res =
@@ -495,7 +495,7 @@ module Ex1 (F : R1Let) = struct
     int 10 + var x
 end
 
-module Ex2 (F : R1Let) = struct
+module Ex2 (F : R1_Let) = struct
   open F
 
   let res =
@@ -515,7 +515,7 @@ module Ex2 (F : R1Let) = struct
     + var x1
 end
 
-module Ex3 (F : R1Let) = struct
+module Ex3 (F : R1_Let) = struct
   open F
   let res =
     observe @@ program

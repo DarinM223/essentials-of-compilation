@@ -416,7 +416,7 @@ module Ex4 (F : R1) = struct
   let res = observe @@ program (int 52 + neg (int 10))
 end
 
-module Ex5 (F : R1Let) = struct
+module Ex5 (F : R1_Let) = struct
   open F
   let res =
     observe @@ program
@@ -426,7 +426,7 @@ module Ex5 (F : R1Let) = struct
     var b
 end
 
-module Ex6 (F : R1Let) = struct
+module Ex6 (F : R1_Let) = struct
   open F
 
   let res =

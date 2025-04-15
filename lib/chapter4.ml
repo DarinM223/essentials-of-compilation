@@ -22,9 +22,9 @@ module type R2 = sig
   val ( >= ) : int exp -> int exp -> bool exp
 end
 
-module type R2Let = sig
+module type R2_Let = sig
   include R2
-  val ( let* ) : 'a exp -> ('a var -> 'b exp) -> 'b exp
+  include Chapter2_definitions.R1_Let with type 'a exp := 'a exp
 end
 
 module R2_Shrink_T
@@ -254,7 +254,7 @@ module X86_1_Printer = struct
 end
 
 module TransformLet (F : R2) :
-  R2Let
+  R2_Let
     with type 'a exp = 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
@@ -268,21 +268,28 @@ module TransformLet (F : R2) :
   include Chapter2_definitions.TransformLet (F)
 end
 
-module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
+module ShrinkPass (F : R2_Shrink) = struct
   module X_exp = Chapter1.MkId (struct
     type 'a t = 'a F.exp
   end)
   module X_program = Chapter1.MkId (struct
     type 'a t = 'a F.program
   end)
-  include R2_Shrink_T (X_exp) (X_program) (F)
-  let ( - ) a b = F.(a + neg b)
-  let andd a b = F.(if_ a b f)
-  let orr a b = F.(if_ a t b)
-  let ( <> ) a b = F.(not (a = b))
-  let ( <= ) a b = F.(not (b < a))
-  let ( > ) a b = F.(b < a)
-  let ( >= ) a b = F.(not (a < b))
+  module IDelta = struct
+    let ( - ) a b = F.(a + neg b)
+    let andd a b = F.(if_ a b f)
+    let orr a b = F.(if_ a t b)
+    let ( <> ) a b = F.(not (a = b))
+    let ( <= ) a b = F.(not (b < a))
+    let ( > ) a b = F.(b < a)
+    let ( >= ) a b = F.(not (a < b))
+  end
+end
+
+module Shrink (F : R2_Shrink) : R2 with type 'a obs = 'a F.obs = struct
+  module M = ShrinkPass (F)
+  include R2_Shrink_T (M.X_exp) (M.X_program) (F)
+  include M.IDelta
 end
 
 module RemoveComplex (F : R2_Shrink) : R2_Shrink with type 'a obs = 'a F.obs =
@@ -622,7 +629,7 @@ struct
   include M.IDelta
 end
 
-module Ex1 (F : R2Let) = struct
+module Ex1 (F : R2_Let) = struct
   open F
 
   let res =
@@ -669,7 +676,7 @@ module PatchInstructions (F : X86_1) = struct
   include M.IDelta
 end
 
-module Ex2 (F : R2Let) = struct
+module Ex2 (F : R2_Let) = struct
   open F
   let res =
     observe @@ program
@@ -678,7 +685,7 @@ module Ex2 (F : R2Let) = struct
     if_ (var a < int 5) (var a + int 1) (int 6 + int 7)
 end
 
-module Ex3 (F : R2Let) = struct
+module Ex3 (F : R2_Let) = struct
   open F
   let res =
     observe @@ program
@@ -686,7 +693,7 @@ module Ex3 (F : R2Let) = struct
        var a < int 5
 end
 
-module Ex4 (F : R2Let) = struct
+module Ex4 (F : R2_Let) = struct
   open F
   let res =
     observe @@ program
@@ -695,7 +702,7 @@ module Ex4 (F : R2Let) = struct
        var b
 end
 
-module Ex5 (F : R2Let) = struct
+module Ex5 (F : R2_Let) = struct
   open F
   let res =
     observe @@ program
@@ -709,7 +716,7 @@ module Ex5 (F : R2Let) = struct
       (var a + neg (int 1))
 end
 
-module Ex6 (F : R2Let) = struct
+module Ex6 (F : R2_Let) = struct
   open F
   let res =
     observe @@ program
