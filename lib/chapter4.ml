@@ -258,14 +258,9 @@ module TransformLet (F : R2) :
     with type 'a exp = 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
-  module X_exp = Chapter1.MkId (struct
-    type 'a t = 'a F.exp
-  end)
-  module X_program = Chapter1.MkId (struct
-    type 'a t = 'a F.program
-  end)
-  include R2_T (X_exp) (X_program) (F)
-  include Chapter2_definitions.TransformLet (F)
+  module M = Chapter2_definitions.TransformLetPass (F)
+  include R2_T (M.X_exp) (M.X_program) (F)
+  include M.IDelta
 end
 
 module ShrinkPass (F : R2_Shrink) = struct

@@ -34,22 +34,29 @@ module R1_T
   let lett v e b = fwd @@ F.lett v (bwd e) (bwd b)
 end
 
-module TransformLet (F : R1) :
-  R1_Let
-    with type 'a exp = 'a F.exp
-     and type 'a program = 'a F.program
-     and type 'a obs = 'a F.obs = struct
+module TransformLetPass (F : R1) = struct
   module X_exp = Chapter1.MkId (struct
     type 'a t = 'a F.exp
   end)
   module X_program = Chapter1.MkId (struct
     type 'a t = 'a F.program
   end)
-  include R1_T (X_exp) (X_program) (F)
-  let ( let* ) e f =
-    let var = fresh () in
-    let body = f var in
-    F.lett var e body
+  module IDelta = struct
+    let ( let* ) e f =
+      let var = F.fresh () in
+      let body = f var in
+      F.lett var e body
+  end
+end
+
+module TransformLet (F : R1) :
+  R1_Let
+    with type 'a exp = 'a F.exp
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  module M = TransformLetPass (F)
+  include R1_T (M.X_exp) (M.X_program) (F)
+  include M.IDelta
 end
 
 module R1_R_T (R : Chapter1.Reader) (F : R1) :
