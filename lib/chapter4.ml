@@ -388,7 +388,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
   let program e () =
     let start_body = e ann_id Tail in
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
-    C1.(program (info [])) (("start", start_body) :: blocks)
+    C1.program (("start", start_body) :: blocks)
 end
 
 module SelectInstructions (F : C1) (X86 : X86_1) :
@@ -436,7 +436,7 @@ module SelectInstructions (F : C1) (X86 : X86_1) :
     | If (t, f) -> X86.[ jmp f; jmp_if L t; cmpq arg2 arg1 ]
   let goto label = [ X86.jmp label ]
   let if_ cond t_label f_label = cond (If (t_label, f_label))
-  let program _ body =
+  let program ?locals:_ body =
     let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
     let exit_block = (exit_label, X86.(block [ retq ])) in
     X86.program (exit_block :: body)

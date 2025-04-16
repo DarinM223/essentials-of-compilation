@@ -109,63 +109,38 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
 
   let lett v e b m r = e m (Assign (F.string_of_var v, fun () -> b ann_id r))
 
-  let program e () = C0.(program (info []) [ ("start", e ann_id Tail) ])
+  let program e () = C0.(program [ ("start", e ann_id Tail) ])
 
   type 'a obs = unit C0.obs
   let observe p = C0.observe (p ())
 end
 
+module StringHashtbl = Hashtbl.Make (String)
+
 module UncoverLocalsPass (F : C0) = struct
-  module S = Set.Make (String)
-  module MkX (M : sig
-    type 'a t
-  end) =
-  struct
-    type 'a from = 'a M.t
-    type 'a term = S.t * 'a from
-    let fwd a = (S.empty, a)
-    let bwd (_, a) = a
+  module R = struct
+    type t = unit StringHashtbl.t
+    let init () = StringHashtbl.create 100
   end
-  module X_arg = MkX (struct
-    type 'a t = 'a F.arg
-  end)
-  module X_exp = MkX (struct
-    type 'a t = 'a F.exp
-  end)
-  module X_stmt = MkX (struct
-    type 'a t = 'a F.stmt
-  end)
-  module X_tail = MkX (struct
-    type 'a t = 'a F.tail
-  end)
-  module X_program = Chapter1.MkId (struct
-    type 'a t = 'a F.program
-  end)
 
   module IDelta = struct
-    let var v = (S.singleton v, F.var v)
-    let arg (locals, a) = (locals, F.arg a)
-    let neg (locals, a) = (locals, F.neg a)
-    let ( + ) (l1, a) (l2, b) = (S.union l1 l2, F.(a + b))
-    let assign v (locals, e) = (S.add v locals, F.assign v e)
-    let return (locals, e) = (locals, F.return e)
-    let ( @> ) (l1, s) (l2, t) = (S.union l1 l2, F.( @> ) s t)
-    let program _ body =
+    let assign v e tbl =
+      StringHashtbl.add tbl v ();
+      F.assign v (e tbl)
+
+    let program ?locals:_ body () =
+      let init = R.init () in
+      let body = List.map (fun (l, t) -> (l, t init)) body in
       let locals =
-        body
-        |> List.fold_left
-             (fun acc (_, (locals, _)) -> S.union locals acc)
-             S.empty
-        |> S.to_list
+        StringHashtbl.to_seq_keys init |> List.of_seq |> List.sort compare
       in
-      let body = List.map (fun (s, t) -> (s, X_tail.bwd t)) body in
-      F.(program (info locals) body)
+      F.(program ~locals body)
   end
 end
 
 module UncoverLocals (F : C0) : C0 with type 'a obs = 'a F.obs = struct
   module M = UncoverLocalsPass (F)
-  include C0_T (M.X_arg) (M.X_exp) (M.X_stmt) (M.X_tail) (M.X_program) (F)
+  include C0_R_T (M.R) (F)
   include M.IDelta
 end
 
@@ -180,7 +155,6 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   type 'a tail = unit X86.instr list
   type 'a program = unit X86.program
   type var = string
-  type info = F.info
   type label = F.label
 
   let int i = (None, X86.int i)
@@ -217,9 +191,8 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
   let return e = X86.retq :: e Return
 
   let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
-  let info = F.info
 
-  let program _ body =
+  let program ?locals:_ body =
     X86.(program (List.map (fun (l, t) -> (l, block (List.rev t))) body))
 
   type 'a obs = unit X86.obs

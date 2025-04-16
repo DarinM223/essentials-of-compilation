@@ -369,10 +369,20 @@ module type C2 = sig
   val void : unit exp
 
   val collect : int -> unit stmt
+  val program :
+    ?locals:(string * R3_Types.typ) list ->
+    (label * unit tail) list ->
+    unit program
 end
 
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
-  include Chapter4.ExplicateControl (F) (C2) ()
+  module C1 = struct
+    include C2
+    let program ?locals body =
+      let locals = Option.map (List.map (fun l -> (l, `Void))) locals in
+      program ?locals body
+  end
+  include Chapter4.ExplicateControl (F) (C1) ()
   module ExpHList = HList (struct
     type 'a t = 'a exp
   end)
@@ -448,6 +458,17 @@ module C2_Pretty = struct
   let global_value name = "(global-value " ^ name ^ ")"
   let void = "(void)"
   let collect i = "(collect " ^ string_of_int i ^ ")"
+  let info i =
+    "("
+    ^ String.concat " "
+        (List.map
+           (fun (v, typ) -> Format.asprintf "(%s . %a)" v R3_Types.pp_typ typ)
+           i)
+    ^ ")"
+  let program ?(locals = []) body =
+    let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
+    let body = String.concat "\n" (List.map pair body) in
+    "(program ((locals . " ^ info locals ^ ")) (" ^ body ^ ")"
 end
 
 module Ex0 (F : R3_Let) = struct
