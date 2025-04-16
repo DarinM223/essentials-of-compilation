@@ -272,6 +272,21 @@ struct
   include Chapter4.R2_T (X_exp) (X_program) (F)
 end
 
+module R3_Collect_T
+    (X_exp : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      R3_Collect
+        with type 'a exp = 'a X_exp.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include R3_Shrink_T (X_exp) (X_program) (F)
+  open X_exp
+  let collect i = fwd @@ F.collect i
+  let allocate i ty = fwd @@ F.allocate i ty
+  let global_value name = fwd @@ F.global_value name
+end
+
 module TransformLet (F : R3) :
   R3_Let
     with type 'a exp = 'a F.exp
@@ -288,19 +303,11 @@ module Shrink (F : R3_Shrink) : R3 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module R3_Collect_T
-    (X_exp : Chapter1.TRANS)
-    (X_program : Chapter1.TRANS)
-    (F :
-      R3_Collect
-        with type 'a exp = 'a X_exp.from
-         and type 'a program = 'a X_program.from) =
+module RemoveComplex (F : R3_Collect) : R3_Collect with type 'a obs = 'a F.obs =
 struct
-  include R3_Shrink_T (X_exp) (X_program) (F)
-  open X_exp
-  let collect i = fwd @@ F.collect i
-  let allocate i ty = fwd @@ F.allocate i ty
-  let global_value name = fwd @@ F.global_value name
+  module M = Chapter2_passes.RemoveComplexPass (F)
+  include R3_Collect_T (M.X) (M.X_program) (F)
+  include M.IDelta
 end
 
 module ExposeAllocation (F : R3_Collect) :
@@ -374,7 +381,7 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
     let ann_fn = { f = (fun exp -> C2.has_type exp ty) } in
     e ann_fn r
   let void = convert_exp C2.void
-  let vector =
+  let vector _ _ _ =
     failwith "vector should have been eliminated before explicate control"
   let vector_ref e ptr m r =
     let tmp = F.(string_of_var (fresh ())) in
@@ -427,6 +434,20 @@ module R3_Collect_Pretty () = struct
   let allocate i typ =
     "(allocate " ^ string_of_int i ^ " " ^ R3_Types.show_typ typ ^ ")"
   let global_value name = "(global-value " ^ name ^ ")"
+end
+
+module C2_Pretty = struct
+  include Chapter4.C1_Pretty
+  let has_type e typ = "(has-type " ^ e ^ " " ^ R3_Types.show_typ typ ^ ")"
+  let allocate i typ =
+    "(allocate " ^ string_of_int i ^ " " ^ R3_Types.show_typ typ ^ ")"
+  let vector_ref v ptr =
+    "(vector-ref " ^ v ^ " " ^ string_of_int (ptr_num ptr) ^ ")"
+  let vector_set v ptr r =
+    "(vector-set! " ^ v ^ " " ^ string_of_int (ptr_num ptr) ^ " " ^ r ^ ")"
+  let global_value name = "(global-value " ^ name ^ ")"
+  let void = "(void)"
+  let collect i = "(collect " ^ string_of_int i ^ ")"
 end
 
 module Ex0 (F : R3_Let) = struct
@@ -510,3 +531,22 @@ let%expect_test "Ex3 annotate types twice" =
   Format.printf "Ex3: %s\n" M.res;
   [%expect
     {| Ex3: (program (has-type (let ([tmp1 (has-type (let ([tmp6 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 16 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 16) `Int)) `Void)]) (has-type (let ([tmp4 (has-type (allocate 1 `Vector ([`Int])) `Vector ([`Int]))]) (has-type (let ([tmp5 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int])) 0 (has-type (let ([tmp0 (has-type 1 `Int)]) (has-type (+ (has-type (var tmp0) `Int) (has-type 2 `Int)) `Int)) `Int)) `Void)]) (has-type (var tmp4) `Vector ([`Int]))) `Vector ([`Int]))) `Vector ([`Int]))) `Vector ([`Int]))]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int])) 0 (has-type (let ([tmp2 (has-type 2 `Int)]) (has-type (+ (has-type (var tmp2) `Int) (has-type 1 `Int)) `Int)) `Int)) `Void)]) (has-type (vector-ref (has-type (var tmp1) `Vector ([`Int])) 0) `Int)) `Int)) `Int)) |}]
+
+let%expect_test "Ex1 explicate control" =
+  let module M =
+    Ex1
+      (TransformLet
+         (Shrink
+            (ExposeAllocation
+               (RemoveComplex
+                  (ExplicateControl (R3_Collect_Pretty ()) (C2_Pretty) ()))))) in
+  Format.printf "Ex1: %s\n" M.res;
+  [%expect
+    {|
+    Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) `Int)) (seq (assign tmp9 (has-type 17 `Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (has-type (global-value fromspace_end) `Int)) (if (has-type (< tmp19 tmp20) `Bool) block_t3 block_f4))))))
+    (block_t3 . (goto block_t1))
+    (block_f2 . (collect 17))
+    (block_body0 . (seq (assign tmp4 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))) (seq (assign tmp11 (has-type 1 `Int)) (seq (assign tmp6 (has-type (vector-set! tmp4 0 tmp11) `Void)) (seq (assign tmp13 (has-type t `Bool)) (seq (assign tmp5 (has-type (vector-set! tmp4 1 tmp13) `Void)) (seq (assign tmp15 (has-type 42 `Int)) (seq (assign tmp2 (has-type (vector-set! tmp4 0 tmp15) `Void)) (seq (assign tmp17 (has-type f `Bool)) (seq (assign tmp3 (has-type (vector-set! tmp4 1 tmp17) `Void)) (return (has-type (vector-ref tmp4 0) `Int))))))))))))
+    (block_t1 . (seq (assign tmp7 (has-type (void) `Void)) (goto block_body0)))
+    (block_f4 . (goto block_f2)))
+    |}]
