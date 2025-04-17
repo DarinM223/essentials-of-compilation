@@ -109,6 +109,17 @@ module type C1 = sig
   val if_ : bool exp -> label -> label -> unit tail
 end
 
+module C1_R_T (R : Chapter1.Reader) (F : C1) = struct
+  include Chapter2_definitions.C0_R_T (R) (F)
+  let t _ = F.t
+  let f _ = F.f
+  let not a r = F.not (a r)
+  let ( = ) a b r = F.(a r = b r)
+  let ( < ) a b r = F.(a r < b r)
+  let goto l _ = F.goto l
+  let if_ e thn els r = F.if_ (e r) thn els
+end
+
 module C1_Pretty = struct
   include Chapter2_definitions.C0_Pretty
   let t = "t"

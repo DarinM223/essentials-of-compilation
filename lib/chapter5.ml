@@ -375,14 +375,30 @@ module type C2 = sig
     unit program
 end
 
+module C1_of_C2 (C2 : C2) = struct
+  include C2
+  let program ?locals body =
+    let locals = Option.map (List.map (fun l -> (l, `Void))) locals in
+    program ?locals body
+end
+
+module C2_R_T (R : Chapter1.Reader) (F : C2) = struct
+  include Chapter4.C1_R_T (R) (C1_of_C2 (F))
+  let has_type e ty r = F.has_type (e r) ty
+  let allocate i ty _ = F.allocate i ty
+  let vector_ref v ptr r = F.vector_ref (v r) ptr
+  let vector_set v ptr w r = F.vector_set (v r) ptr (w r)
+  let global_value name _ = F.global_value name
+  let void _ = F.void
+  let collect i _ = F.collect i
+  let program ?locals body () =
+    let init = R.init () in
+    let body = List.map (fun (l, t) -> (l, t init)) body in
+    F.program ?locals body
+end
+
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
-  module C1 = struct
-    include C2
-    let program ?locals body =
-      let locals = Option.map (List.map (fun l -> (l, `Void))) locals in
-      program ?locals body
-  end
-  include Chapter4.ExplicateControl (F) (C1) ()
+  include Chapter4.ExplicateControl (F) (C1_of_C2 (C2)) ()
   module ExpHList = HList (struct
     type 'a t = 'a exp
   end)
@@ -413,9 +429,48 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
                         C2.(
                           vector_set (var (lookup tmp1)) ptr (var (lookup tmp2)))
                         m r )) ))
-  let collect i _ _ = C2.collect i
+
+  let collect i _ = function
+    | Tail -> C2.(collect i @> return void)
+    | Assign (_, body) -> C2.(collect i @> body ())
+    | Pred _ ->
+      failwith "Garbage collection isn't a boolean used for short circuiting"
   let allocate i ty = convert_exp (C2.allocate i ty)
   let global_value name = convert_exp (C2.global_value name)
+end
+
+module StringHashtbl = Chapter2_passes.StringHashtbl
+module UncoverLocalsPass (F : C2) = struct
+  module R = struct
+    type t = string option * R3_Types.typ StringHashtbl.t
+    let init () = (None, StringHashtbl.create 100)
+    let compare (a, _) (b, _) =
+      match Int.compare (String.length a) (String.length b) with
+      | 0 -> String.compare a b
+      | c -> c
+  end
+
+  module IDelta = struct
+    let assign v e (_, tbl) = F.assign v (e (Some v, tbl))
+    let has_type e ty = function
+      | Some v, tbl ->
+        StringHashtbl.add tbl v ty;
+        e (None, tbl)
+      | None, tbl -> e (None, tbl)
+
+    let program ?locals:_ body () =
+      let ((_, table) as init) = R.init () in
+      let body = List.map (fun (l, t) -> (l, t init)) body in
+      let locals =
+        StringHashtbl.to_seq table |> List.of_seq |> List.sort R.compare
+      in
+      F.(program ~locals body)
+  end
+end
+module UncoverLocals (F : C2) : C2 with type 'a obs = 'a F.obs = struct
+  module M = UncoverLocalsPass (F)
+  include C2_R_T (M.R) (F)
+  include M.IDelta
 end
 
 module R3_Pretty () = struct
@@ -566,8 +621,30 @@ let%expect_test "Ex1 explicate control" =
     {|
     Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) `Int)) (seq (assign tmp9 (has-type 17 `Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (has-type (global-value fromspace_end) `Int)) (if (has-type (< tmp19 tmp20) `Bool) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
-    (block_f2 . (collect 17))
+    (block_f2 . (seq (collect 17) (goto block_body0)))
     (block_body0 . (seq (assign tmp4 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))) (seq (assign tmp11 (has-type 1 `Int)) (seq (assign tmp6 (has-type (vector-set! tmp4 0 tmp11) `Void)) (seq (assign tmp13 (has-type t `Bool)) (seq (assign tmp5 (has-type (vector-set! tmp4 1 tmp13) `Void)) (seq (assign tmp15 (has-type 42 `Int)) (seq (assign tmp2 (has-type (vector-set! tmp4 0 tmp15) `Void)) (seq (assign tmp17 (has-type f `Bool)) (seq (assign tmp3 (has-type (vector-set! tmp4 1 tmp17) `Void)) (return (has-type (vector-ref tmp4 0) `Int))))))))))))
     (block_t1 . (seq (assign tmp7 (has-type (void) `Void)) (goto block_body0)))
+    (block_f4 . (goto block_f2)))
+    |}]
+
+let%expect_test "Ex1 uncover locals" =
+  let module M =
+    Ex1
+      (TransformLet
+         (Shrink
+            (ExposeAllocation
+               (RemoveComplex
+                  (ExplicateControl
+                     (R3_Collect_Pretty ())
+                     (UncoverLocals (C2_Pretty))
+                     ()))))) in
+  Format.printf "Ex1: %s\n" M.res;
+  [%expect
+    {|
+    Ex1: (program ((locals . ((tmp2 . `Void) (tmp3 . `Void) (tmp4 . `Vector ([`Int; `Bool])) (tmp5 . `Void) (tmp6 . `Void) (tmp7 . `Void) (tmp8 . `Int) (tmp9 . `Int) (tmp11 . `Int) (tmp13 . `Bool) (tmp15 . `Int) (tmp17 . `Bool) (tmp20 . `Int)))) ((start . (seq (assign tmp8 (global-value free_ptr)) (seq (assign tmp9 17) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (global-value fromspace_end)) (if (< tmp19 tmp20) block_t3 block_f4))))))
+    (block_t3 . (goto block_t1))
+    (block_f2 . (seq (collect 17) (goto block_body0)))
+    (block_body0 . (seq (assign tmp4 (allocate 1 `Vector ([`Int; `Bool]))) (seq (assign tmp11 1) (seq (assign tmp6 (vector-set! tmp4 0 tmp11)) (seq (assign tmp13 t) (seq (assign tmp5 (vector-set! tmp4 1 tmp13)) (seq (assign tmp15 42) (seq (assign tmp2 (vector-set! tmp4 0 tmp15)) (seq (assign tmp17 f) (seq (assign tmp3 (vector-set! tmp4 1 tmp17)) (return (vector-ref tmp4 0))))))))))))
+    (block_t1 . (seq (assign tmp7 (void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))
     |}]
