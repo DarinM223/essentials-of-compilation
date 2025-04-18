@@ -61,13 +61,10 @@ module R3_Types = struct
     ]
   [@@deriving show]
 
-  (* TODO: check if these sizes are correct *)
   let rec allocation_size : typ -> int = function
-    | `Int -> 8
-    | `Bool -> 1
-    | `Void -> 0
     | `Vector ts ->
       8 + List.fold_left (fun acc t -> acc + allocation_size t) 0 ts
+    | _ -> 8
 end
 
 module type R3_Shrink = sig
@@ -397,6 +394,25 @@ module C2_R_T (R : Chapter1.Reader) (F : C2) = struct
     F.program ?locals body
 end
 
+module type X86_2 = sig
+  include Chapter4.X86_1
+  open Chapter2_definitions
+  val global_value : string -> 'a arg
+  val program :
+    ?locals:R3_Types.typ StringMap.t ->
+    ?stack_size:int ->
+    ?conflicts:ArgSet.t ArgMap.t ->
+    ?moves:ArgSet.t ArgMap.t ->
+    (label * unit block) list ->
+    unit program
+end
+
+module X86_1_of_X86_2 (X86 : X86_2) = struct
+  include X86
+  let program ?stack_size ?conflicts ?moves blocks =
+    program ~locals:StringMap.empty ?stack_size ?conflicts ?moves blocks
+end
+
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   include Chapter4.ExplicateControl (F) (C1_of_C2 (C2)) ()
   module ExpHList = HList (struct
@@ -471,6 +487,61 @@ module UncoverLocals (F : C2) : C2 with type 'a obs = 'a F.obs = struct
   module M = UncoverLocalsPass (F)
   include C2_R_T (M.R) (F)
   include M.IDelta
+end
+
+module SelectInstructions (F : C2) (X86 : X86_2) :
+  C2 with type 'a obs = unit X86.obs = struct
+  module C1 = C1_of_C2 (F)
+  include Chapter4.SelectInstructions (C1) (X86_1_of_X86_2 (X86))
+  let has_type e _ ctx = e ctx
+  let allocate len _typ =
+    let off = Int.(8 * add len 1) in
+    (* TODO: calculate tag from typ *)
+    let tag = 0 in
+    let create lhs =
+      X86.
+        [
+          movq (int tag) (deref r11 0);
+          movq lhs (reg r11);
+          addq (int off) (global_value "free_ptr");
+          movq (global_value "free_ptr") lhs;
+        ]
+    in
+    function
+    | Assign v -> create (X86.var v)
+    | Return -> create X86.(reg rax)
+    | If _ -> failwith "allocate cannot be used in an if statement"
+  let vector_ref (_, vec) ptr =
+    let n = ptr_num ptr in
+    let off = Int.(8 * add n 1) in
+    function
+    | Assign v -> X86.[ movq (deref r11 off) (var v); movq vec (reg r11) ]
+    | Return -> X86.[ movq (deref r11 off) (reg rax); movq vec (reg r11) ]
+    | If (t, f) ->
+      X86.
+        [ jmp t; jmp_if E f; cmpq (int 0) (deref r11 off); movq vec (reg r11) ]
+  let vector_set (_, vec) ptr (_, arg) =
+    let n = ptr_num ptr in
+    let off = Int.(8 * add n 1) in
+    function
+    | Assign v ->
+      X86.[ movq (int 0) (var v); movq arg (deref r11 off); movq vec (reg r11) ]
+    | Return ->
+      X86.
+        [ movq (int 0) (reg rax); movq arg (deref r11 off); movq vec (reg r11) ]
+    | If (_t, f) -> X86.[ jmp f; movq arg (deref r11 off); movq vec (reg r11) ]
+  let global_value name = function
+    | Assign v -> X86.[ movq (global_value name) (var v) ]
+    | Return -> X86.[ movq (global_value name) (reg rax) ]
+    | If (t, f) -> X86.[ jmp t; jmp_if E f; cmpq (int 0) (global_value name) ]
+  let collect i =
+    X86.[ callq "collect"; movq (int i) (reg rsi); movq (reg r15) (reg rdi) ]
+  let void = arg (int 0)
+  let program ?(locals = []) body =
+    let locals = StringMap.of_list locals in
+    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_block = (exit_label, X86.(block [ retq ])) in
+    X86.program ~locals (exit_block :: body)
 end
 
 module R3_Pretty () = struct
@@ -583,7 +654,7 @@ let%expect_test "Ex1 test expose allocation" =
     Ex1 (TransformLet (Shrink (ExposeAllocation (R3_Collect_Pretty ())))) in
   Format.printf "Ex1: %s\n" M.res;
   [%expect
-    {| Ex1: (program (has-type (let ([tmp0 (has-type (let ([tmp7 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 17 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 17) `Int)) `Void)]) (has-type (let ([tmp4 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int; `Bool])) 0 (has-type 1 `Int)) `Void)]) (has-type (let ([tmp5 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int; `Bool])) 1 (has-type t `Bool)) `Void)]) (has-type (var tmp4) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp1 (has-type (var tmp0) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp2 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 0 (has-type 42 `Int)) `Void)]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 1 (has-type f `Bool)) `Void)]) (has-type (vector-ref (has-type (var tmp0) `Vector ([`Int; `Bool])) 0) `Int)) `Int)) `Int)) `Int)) `Int)) |}]
+    {| Ex1: (program (has-type (let ([tmp0 (has-type (let ([tmp7 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) `Int) (has-type 24 `Int)) `Int) (has-type (global-value fromspace_end) `Int)) `Bool) (has-type (void) `Void) (has-type (collect 24) `Int)) `Void)]) (has-type (let ([tmp4 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int; `Bool])) 0 (has-type 1 `Int)) `Void)]) (has-type (let ([tmp5 (has-type (vector-set! (has-type (var tmp4) `Vector ([`Int; `Bool])) 1 (has-type t `Bool)) `Void)]) (has-type (var tmp4) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp1 (has-type (var tmp0) `Vector ([`Int; `Bool]))]) (has-type (let ([tmp2 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 0 (has-type 42 `Int)) `Void)]) (has-type (let ([tmp3 (has-type (vector-set! (has-type (var tmp1) `Vector ([`Int; `Bool])) 1 (has-type f `Bool)) `Void)]) (has-type (vector-ref (has-type (var tmp0) `Vector ([`Int; `Bool])) 0) `Int)) `Int)) `Int)) `Int)) `Int)) |}]
 
 let%expect_test "Ex0 annotate types twice" =
   let module M =
@@ -619,9 +690,9 @@ let%expect_test "Ex1 explicate control" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) `Int)) (seq (assign tmp9 (has-type 17 `Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (has-type (global-value fromspace_end) `Int)) (if (has-type (< tmp19 tmp20) `Bool) block_t3 block_f4))))))
+    Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) `Int)) (seq (assign tmp9 (has-type 24 `Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (has-type (global-value fromspace_end) `Int)) (if (has-type (< tmp19 tmp20) `Bool) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
-    (block_f2 . (seq (collect 17) (goto block_body0)))
+    (block_f2 . (seq (collect 24) (goto block_body0)))
     (block_body0 . (seq (assign tmp4 (has-type (allocate 1 `Vector ([`Int; `Bool])) `Vector ([`Int; `Bool]))) (seq (assign tmp11 (has-type 1 `Int)) (seq (assign tmp6 (has-type (vector-set! tmp4 0 tmp11) `Void)) (seq (assign tmp13 (has-type t `Bool)) (seq (assign tmp5 (has-type (vector-set! tmp4 1 tmp13) `Void)) (seq (assign tmp15 (has-type 42 `Int)) (seq (assign tmp2 (has-type (vector-set! tmp4 0 tmp15) `Void)) (seq (assign tmp17 (has-type f `Bool)) (seq (assign tmp3 (has-type (vector-set! tmp4 1 tmp17) `Void)) (return (has-type (vector-ref tmp4 0) `Int))))))))))))
     (block_t1 . (seq (assign tmp7 (has-type (void) `Void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))
@@ -641,9 +712,9 @@ let%expect_test "Ex1 uncover locals" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((locals . ((tmp2 . `Void) (tmp3 . `Void) (tmp4 . `Vector ([`Int; `Bool])) (tmp5 . `Void) (tmp6 . `Void) (tmp7 . `Void) (tmp8 . `Int) (tmp9 . `Int) (tmp11 . `Int) (tmp13 . `Bool) (tmp15 . `Int) (tmp17 . `Bool) (tmp20 . `Int)))) ((start . (seq (assign tmp8 (global-value free_ptr)) (seq (assign tmp9 17) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (global-value fromspace_end)) (if (< tmp19 tmp20) block_t3 block_f4))))))
+    Ex1: (program ((locals . ((tmp2 . `Void) (tmp3 . `Void) (tmp4 . `Vector ([`Int; `Bool])) (tmp5 . `Void) (tmp6 . `Void) (tmp7 . `Void) (tmp8 . `Int) (tmp9 . `Int) (tmp11 . `Int) (tmp13 . `Bool) (tmp15 . `Int) (tmp17 . `Bool) (tmp20 . `Int)))) ((start . (seq (assign tmp8 (global-value free_ptr)) (seq (assign tmp9 24) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (global-value fromspace_end)) (if (< tmp19 tmp20) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
-    (block_f2 . (seq (collect 17) (goto block_body0)))
+    (block_f2 . (seq (collect 24) (goto block_body0)))
     (block_body0 . (seq (assign tmp4 (allocate 1 `Vector ([`Int; `Bool]))) (seq (assign tmp11 1) (seq (assign tmp6 (vector-set! tmp4 0 tmp11)) (seq (assign tmp13 t) (seq (assign tmp5 (vector-set! tmp4 1 tmp13)) (seq (assign tmp15 42) (seq (assign tmp2 (vector-set! tmp4 0 tmp15)) (seq (assign tmp17 f) (seq (assign tmp3 (vector-set! tmp4 1 tmp17)) (return (vector-ref tmp4 0))))))))))))
     (block_t1 . (seq (assign tmp7 (void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))

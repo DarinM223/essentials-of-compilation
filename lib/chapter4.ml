@@ -402,8 +402,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
     C1.program (("start", start_body) :: blocks)
 end
 
-module SelectInstructions (F : C1) (X86 : X86_1) :
-  C1 with type 'a obs = unit X86.obs = struct
+module SelectInstructions (F : C1) (X86 : X86_1) = struct
   include Chapter2_passes.SelectInstructions (F) (X86)
 
   let exit_label = "block_exit"
