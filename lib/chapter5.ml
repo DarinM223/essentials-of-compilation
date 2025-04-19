@@ -65,6 +65,29 @@ module R3_Types = struct
     | `Vector ts ->
       8 + List.fold_left (fun acc t -> acc + allocation_size t) 0 ts
     | _ -> 8
+
+  let mk_tag : typ -> int = function
+    | `Vector typs when List.length typs > 50 ->
+      failwith "Tuple has a max length of 50 elements"
+    | `Vector typs ->
+      (* TODO: fill out 63 bit tag:
+         bits 58-62: unused space
+         bits 7-57: 50 bits for pointer mask, 1 if pointer, 0 if other kind of data
+         bits 1-6: length of the tuple
+         bits 0: 1 if tuple hasn't been copied, 0 if forwarding pointer
+       *)
+      let mask = ref 0 in
+      let go i = function
+        | `Vector _ -> mask := !mask lor (1 lsl i)
+        | _ -> ()
+      in
+      List.iteri go typs;
+      let len = List.length typs in
+      mask := (!mask lsl 6) lor len;
+      (* TODO: How to know if its a forwarding pointer by default? *)
+      mask := !mask lsl 1;
+      !mask
+    | _ -> failwith "Expected tagged pointer type for mk_tag"
 end
 
 module type R3_Shrink = sig
@@ -494,10 +517,9 @@ module SelectInstructions (F : C2) (X86 : X86_2) :
   module C1 = C1_of_C2 (F)
   include Chapter4.SelectInstructions (C1) (X86_1_of_X86_2 (X86))
   let has_type e _ ctx = e ctx
-  let allocate len _typ =
+  let allocate len typ =
     let off = Int.(8 * add len 1) in
-    (* TODO: calculate tag from typ *)
-    let tag = 0 in
+    let tag = R3_Types.mk_tag typ in
     let create lhs =
       X86.
         [
