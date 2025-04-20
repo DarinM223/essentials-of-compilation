@@ -70,11 +70,11 @@ module R3_Types = struct
     | `Vector typs when List.length typs > 50 ->
       failwith "Tuple has a max length of 50 elements"
     | `Vector typs ->
-      (* TODO: fill out 63 bit tag:
+      (* Fill out 63 bit tag:
          bits 58-62: unused space
          bits 7-57: 50 bits for pointer mask, 1 if pointer, 0 if other kind of data
          bits 1-6: length of the tuple
-         bits 0: 1 if tuple hasn't been copied, 0 if forwarding pointer
+         bit 0: 1 if tuple hasn't been copied, 0 if forwarding pointer
        *)
       let mask = ref 0 in
       let go i = function
@@ -84,8 +84,7 @@ module R3_Types = struct
       List.iteri go typs;
       let len = List.length typs in
       mask := (!mask lsl 6) lor len;
-      (* TODO: How to know if its a forwarding pointer by default? *)
-      mask := !mask lsl 1;
+      mask := (!mask lsl 1) lor 1;
       !mask
     | _ -> failwith "Expected tagged pointer type for mk_tag"
 end
@@ -741,3 +740,33 @@ let%expect_test "Ex1 uncover locals" =
     (block_t1 . (seq (assign tmp7 (void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))
     |}]
+
+(* Utility function for printing integers as binary for testing the tag creation *)
+let int2bin =
+  let int_size = Sys.int_size in
+  let buf = Bytes.create int_size in
+  fun n ->
+    for i = 0 to int_size - 1 do
+      let pos = int_size - 1 - i in
+      Bytes.set buf pos (if n land (1 lsl i) != 0 then '1' else '0')
+    done;
+    (* skip leading zeros *)
+    match Bytes.index_opt buf '1' with
+    | None -> "0b0"
+    | Some i -> "0b" ^ Bytes.sub_string buf i (int_size - i)
+
+let%expect_test "Tag for vector 1" =
+  let typ =
+    `Vector
+      [
+        `Vector [ `Int ];
+        `Int;
+        `Vector [ `Bool; `Void ];
+        `Bool;
+        `Void;
+        `Vector [];
+      ]
+  in
+  let tag = R3_Types.mk_tag typ in
+  Format.printf "Tag: %s" (int2bin tag);
+  [%expect {| Tag: 0b1001010001101 |}]
