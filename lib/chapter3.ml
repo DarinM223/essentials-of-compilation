@@ -348,6 +348,31 @@ module AllocateRegistersPass (X86 : X86_0) = struct
     type _ eff += Rename : string -> 'a X86.arg eff
     let var v _ = Effect.perform (Rename v)
 
+    let reg_of_color stack_size color_slot_table = function
+      | 0 -> X86.(reg rbx)
+      | 1 -> X86.(reg rcx)
+      | 2 -> X86.(reg rdx)
+      | 3 -> X86.(reg rsi)
+      | 4 -> X86.(reg rdi)
+      | 5 -> X86.(reg r8)
+      | 6 -> X86.(reg r9)
+      | 7 -> X86.(reg r10)
+      | 8 -> X86.(reg r11)
+      | 9 -> X86.(reg r12)
+      | 10 -> X86.(reg r13)
+      | 11 -> X86.(reg r14)
+      | 12 -> X86.(reg r15)
+      | c ->
+        let slot =
+          try Hashtbl.find color_slot_table c
+          with Not_found ->
+            stack_size := !stack_size + 8;
+            let slot = - !stack_size in
+            Hashtbl.add color_slot_table c slot;
+            slot
+        in
+        X86.(deref rbp slot)
+
     let program ?stack_size:_ ?(conflicts = ArgMap.empty)
         ?(moves = ArgMap.empty) blocks () =
       let stack_size = ref 0 in
@@ -357,40 +382,10 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       let conflicts =
         conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
       in
-      let vars =
-        conflicts |> ArgMap.bindings |> List.map (fun (key, _) -> key)
-      in
+      let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
       let get_arg v =
-        let color =
-          match ArgMap.find_opt (Arg.Var v) colors with
-          | Some color -> color
-          | None -> failwith @@ "Invalid variable: " ^ v ^ " not in colors map"
-        in
-        match color with
-        | 0 -> X86.(reg rbx)
-        | 1 -> X86.(reg rcx)
-        | 2 -> X86.(reg rdx)
-        | 3 -> X86.(reg rsi)
-        | 4 -> X86.(reg rdi)
-        | 5 -> X86.(reg r8)
-        | 6 -> X86.(reg r9)
-        | 7 -> X86.(reg r10)
-        | 8 -> X86.(reg r11)
-        | 9 -> X86.(reg r12)
-        | 10 -> X86.(reg r13)
-        | 11 -> X86.(reg r14)
-        | 12 -> X86.(reg r15)
-        | c ->
-          let slot =
-            try Hashtbl.find color_slot_table c
-            with Not_found ->
-              stack_size := !stack_size + 8;
-              let slot = - !stack_size in
-              Hashtbl.add color_slot_table c slot;
-              slot
-          in
-          X86.(deref rbp slot)
+        reg_of_color stack_size color_slot_table (ArgMap.find_var v colors)
       in
       let blocks =
         try List.map (fun (l, b) -> (l, b ())) blocks

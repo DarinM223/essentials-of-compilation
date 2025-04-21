@@ -255,6 +255,13 @@ module ArgMap = struct
     let pp_sep fmt _ = fprintf fmt ";@ " in
     let pp_tuple fmt (a, b) = fprintf fmt "%a -> %a" Arg.pp a pp_value b in
     fprintf fmt "{@[%a@]}" (pp_print_list ~pp_sep pp_tuple) (to_list map)
+
+  let find_var v map =
+    match find_opt (Arg.Var v) map with
+    | Some r -> r
+    | None -> failwith @@ "Invalid variable: " ^ v ^ " not in map"
+
+  let keys map = List.map fst (bindings map)
 end
 
 module type X86_0 = sig
