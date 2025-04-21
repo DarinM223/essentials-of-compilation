@@ -435,6 +435,30 @@ module X86_1_of_X86_2 (X86 : X86_2) = struct
     program ~locals:StringMap.empty ?stack_size ?conflicts ?moves blocks
 end
 
+module X86_2_T
+    (X_reg : Chapter1.TRANS)
+    (X_arg : Chapter1.TRANS)
+    (X_instr : Chapter1.TRANS)
+    (X_block : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      X86_2
+        with type 'a reg = 'a X_reg.from
+         and type 'a arg = 'a X_arg.from
+         and type 'a instr = 'a X_instr.from
+         and type 'a block = 'a X_block.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include
+    Chapter4.X86_1_T (X_reg) (X_arg) (X_instr) (X_block) (X_program)
+      (X86_1_of_X86_2 (F))
+  let global_value label = X_arg.fwd @@ F.global_value label
+  let program ?locals ?stack_size ?conflicts ?moves blocks =
+    X_program.fwd
+    @@ F.program ?locals ?stack_size ?conflicts ?moves
+    @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
+end
+
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   include Chapter4.ExplicateControl (F) (C1_of_C2 (C2)) ()
   module ExpHList = HList (struct
@@ -563,6 +587,50 @@ module SelectInstructions (F : C2) (X86 : X86_2) :
     let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
     let exit_block = (exit_label, X86.(block [ retq ])) in
     X86.program ~locals (exit_block :: body)
+end
+
+module ArgMap = Chapter2_definitions.ArgMap
+module GraphUtils = Chapter3.GraphUtils
+module BuildInterferencePass (X86 : X86_2) = struct
+  include Chapter4.BuildInterferencePass (X86_1_of_X86_2 (X86))
+  module IDelta = struct
+    include IDelta
+
+    let callee_saves = X86.[ rbx; r12; r13; r14; r15; rsp; rbp ]
+
+    let program ?(locals = StringMap.empty) ?stack_size ?conflicts:_ ?moves
+        blocks =
+      let interference_graph =
+        (* If a vector typed variable is live during a call to the collector,
+           it must be spilled to ensure it is visible to the collector.
+           This is done by adding interferences for vector typed variables
+           to all callee save registers so it must be spilled into a stack slot.
+         *)
+        let add_pointer_interferences var typ graph =
+          match typ with
+          | `Vector _ ->
+            let add_register_interference acc reg =
+              GraphUtils.add_interference (Reg (Hashtbl.hash reg)) (Var var) acc
+            in
+            List.fold_left add_register_interference graph callee_saves
+          | _ -> graph
+        in
+        StringMap.fold add_pointer_interferences locals ArgMap.empty
+      in
+      let interference_graph =
+        List.fold_left
+          (fun graph (_, (f, _)) -> f graph)
+          interference_graph blocks
+      in
+      let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
+      X86.program ~locals ?stack_size ~conflicts:interference_graph ?moves
+        blocks
+  end
+end
+module BuildInterference (F : X86_2) = struct
+  module M = BuildInterferencePass (F)
+  include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
 end
 
 module R3_Pretty () = struct
