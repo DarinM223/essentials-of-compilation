@@ -348,6 +348,17 @@ module AllocateRegistersPass (X86 : X86_0) = struct
     type _ eff += Rename : string -> 'a X86.arg eff
     let var v _ = Effect.perform (Rename v)
 
+    let spill stack_size slot_table reg color =
+      let slot =
+        try Hashtbl.find slot_table color
+        with Not_found ->
+          stack_size := !stack_size + 8;
+          let slot = - !stack_size in
+          Hashtbl.add slot_table color slot;
+          slot
+      in
+      X86.deref reg slot
+
     let reg_of_color stack_size color_slot_table = function
       | 0 -> X86.(reg rbx)
       | 1 -> X86.(reg rcx)
@@ -362,16 +373,7 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       | 10 -> X86.(reg r13)
       | 11 -> X86.(reg r14)
       | 12 -> X86.(reg r15)
-      | c ->
-        let slot =
-          try Hashtbl.find color_slot_table c
-          with Not_found ->
-            stack_size := !stack_size + 8;
-            let slot = - !stack_size in
-            Hashtbl.add color_slot_table c slot;
-            slot
-        in
-        X86.(deref rbp slot)
+      | color -> spill stack_size color_slot_table X86.rbp color
 
     let program ?stack_size:_ ?(conflicts = ArgMap.empty)
         ?(moves = ArgMap.empty) blocks () =

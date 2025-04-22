@@ -459,6 +459,24 @@ struct
     @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
 end
 
+module X86_2_R_T (R : Chapter1.Reader) (F : X86_2) :
+  X86_2
+    with type 'a reg = R.t -> 'a F.reg
+     and type 'a arg = R.t -> 'a F.arg
+     and type 'a instr = R.t -> 'a F.instr
+     and type 'a block = R.t -> 'a F.block
+     and type 'a program = unit -> 'a F.program
+     and type label = F.label
+     and type 'a obs = 'a F.obs = struct
+  module M = X86_1_of_X86_2 (F)
+  include Chapter4.X86_1_R_T (R) (M)
+  let global_value label _ = F.global_value label
+  let program ?locals ?stack_size ?conflicts ?moves blocks () =
+    let init = R.init () in
+    F.program ?locals ?stack_size ?conflicts ?moves
+      (List.map (fun (l, b) -> (l, b init)) blocks)
+end
+
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   include Chapter4.ExplicateControl (F) (C1_of_C2 (C2)) ()
   module ExpHList = HList (struct
@@ -630,6 +648,55 @@ end
 module BuildInterference (F : X86_2) = struct
   module M = BuildInterferencePass (F)
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+end
+
+module AllocateRegistersPass (X86 : X86_2) = struct
+  include Chapter3.AllocateRegistersPass (X86_1_of_X86_2 (X86))
+  module IDelta = struct
+    include IDelta
+    open Chapter2_definitions
+    let reg_of_color root_stack_size stack_size color_slot_table typ color =
+      if color >= 0 && color <= 12 then
+        reg_of_color stack_size color_slot_table color
+      else
+        match typ with
+        | `Vector _ -> spill root_stack_size color_slot_table X86.r15 color
+        | _ -> reg_of_color stack_size color_slot_table color
+
+    let program ?(locals = StringMap.empty) ?stack_size:_
+        ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) blocks () =
+      let root_stack_size = ref 0 in
+      let stack_size = ref 0 in
+      let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
+      (* Remove rax, r11, and r15 from the interference graph *)
+      let rax = Arg.Reg (Hashtbl.hash X86.rax) in
+      let r11 = Arg.Reg (Hashtbl.hash X86.r11) in
+      let r15 = Arg.Reg (Hashtbl.hash X86.r15) in
+      let conflicts =
+        conflicts |> ArgMap.remove rax |> ArgMap.remove r11 |> ArgMap.remove r15
+        |> ArgMap.map (ArgSet.remove rax)
+        |> ArgMap.map (ArgSet.remove r11)
+        |> ArgMap.map (ArgSet.remove r15)
+      in
+      let vars = ArgMap.keys conflicts in
+      let colors = GraphUtils.color_graph moves conflicts vars in
+      let get_arg v =
+        let color = ArgMap.find_var v colors in
+        let typ = StringMap.find v locals in
+        reg_of_color root_stack_size stack_size color_slot_table typ color
+      in
+      let blocks =
+        try List.map (fun (l, b) -> (l, b ())) blocks
+        with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
+      in
+      X86.program ~stack_size:!stack_size ~conflicts ~moves blocks
+  end
+end
+module AllocateRegisters (X86 : X86_2) : X86_2 with type 'a obs = 'a X86.obs =
+struct
+  module M = AllocateRegistersPass (X86)
+  include X86_2_R_T (M.X_reader) (X86)
   include M.IDelta
 end
 
