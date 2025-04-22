@@ -256,7 +256,14 @@ module BuildInterferencePass (X86 : X86_0) = struct
       (* The live_before set is the first element in the live_after array.
          To get the live_after list for each instruction, ignore the first element.
       *)
-      let live_after' = List.tl @@ Array.to_list live_after' in
+      let live_after' =
+        match Array.to_list live_after' with
+        | _ :: tl -> tl
+        | _ ->
+          failwith
+            "Could not get the live_before set, did you run UncoverLive before \
+             BuildInterference?"
+      in
       let acc_block graph =
         List.fold_left
           (fun graph (live_after, (f, _)) -> f live_after graph)
@@ -323,11 +330,15 @@ module BuildMovesPass (X86 : X86_0) = struct
       let acc = List.fold_right Fun.compose accs (fun a -> a) in
       (acc, X86.block ?live_after instrs)
 
-    let program ?stack_size ?conflicts ?moves:_ blocks =
+    let program_helper blocks =
       let moves =
         List.fold_left (fun graph (_, (f, _)) -> f graph) ArgMap.empty blocks
       in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
+      (moves, blocks)
+
+    let program ?stack_size ?conflicts ?moves:_ blocks =
+      let moves, blocks = program_helper blocks in
       X86.program ?stack_size ?conflicts ~moves blocks
   end
 end

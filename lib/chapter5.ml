@@ -607,6 +607,15 @@ module SelectInstructions (F : C2) (X86 : X86_2) :
     X86.program ~locals (exit_block :: body)
 end
 
+module UncoverLive (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
+  module M = Chapter4.UncoverLivePass (X86_1_of_X86_2 (F))
+  include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+  let program ?locals ?stack_size ?conflicts ?moves blocks =
+    let blocks = program_helper blocks in
+    F.program ?locals ?stack_size ?conflicts ?moves blocks
+end
+
 module ArgMap = Chapter2_definitions.ArgMap
 module GraphUtils = Chapter3.GraphUtils
 module BuildInterferencePass (X86 : X86_2) = struct
@@ -649,6 +658,15 @@ module BuildInterference (F : X86_2) = struct
   module M = BuildInterferencePass (F)
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
+end
+
+module BuildMoves (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
+  module M = Chapter4.BuildMovesPass (X86_1_of_X86_2 (F))
+  include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
+  include M.IDelta
+  let program ?locals ?stack_size ?conflicts ?moves:_ blocks =
+    let moves, blocks = program_helper blocks in
+    F.program ?locals ?stack_size ?conflicts ~moves blocks
 end
 
 module AllocateRegistersPass (X86 : X86_2) = struct
@@ -751,6 +769,25 @@ module C2_Pretty = struct
     let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
     let body = String.concat "\n" (List.map pair body) in
     "(program ((locals . " ^ info locals ^ ")) (" ^ body ^ ")"
+end
+
+module X86_2_Pretty = struct
+  include Chapter4.X86_1_Pretty
+  let global_value label = "(global-value " ^ label ^ ")"
+  let locals_info = function
+    | Some locals ->
+      let locals = StringMap.bindings locals in
+      let pp_pair fmt (lab, typ) =
+        Format.fprintf fmt "(%s . %a)" lab R3_Types.pp_typ typ
+      in
+      Format.asprintf "(locals . %a)" (Format.pp_print_list pp_pair) locals
+    | None -> ""
+
+  let program ?locals ?stack_size ?conflicts ?moves body =
+    let info =
+      enclose @@ locals_info locals ^ program_info stack_size conflicts moves
+    in
+    program_helper info body
 end
 
 module Ex0 (F : R3_Let) = struct
@@ -905,3 +942,21 @@ let%expect_test "Tag for vector 1" =
   let tag = R3_Types.mk_tag typ in
   Format.printf "Tag: %s" (int2bin tag);
   [%expect {| Tag: 0b1001010001101 |}]
+
+let%expect_test "Ex2 allocate registers" =
+  let module M =
+    Ex2
+      (TransformLet
+         (Shrink
+            (ExposeAllocation
+               (RemoveComplex
+                  (ExplicateControl
+                     (R3_Collect_Pretty ())
+                     (UncoverLocals
+                        (SelectInstructions
+                           (C2_Pretty)
+                           (UncoverLive
+                              (BuildInterference
+                                 (BuildMoves (AllocateRegisters (X86_2_Pretty)))))))
+                     ()))))) in
+  Format.printf "Ex2: %s" M.res

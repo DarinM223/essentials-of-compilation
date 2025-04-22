@@ -527,7 +527,7 @@ module UncoverLivePass (X86 : X86_1) = struct
       Topsort.iter (fun v -> rev_topo_labels := v :: !rev_topo_labels) graph;
       (G.succ graph, !rev_topo_labels)
 
-    let program ?stack_size ?conflicts ?moves blocks =
+    let program_helper blocks =
       let build_fn_map =
         blocks
         |> List.map (fun (label, { X_block.build_fn; _ }) -> (label, build_fn))
@@ -549,16 +549,16 @@ module UncoverLivePass (X86 : X86_1) = struct
         StringHashtbl.add result_blocks label block
       in
       List.iter go rev_topsort_labels;
-      let blocks =
-        rev_topsort_labels |> List.rev
-        |> List.map (fun label ->
-               (label, StringHashtbl.find result_blocks label))
-      in
+      rev_topsort_labels |> List.rev
+      |> List.map (fun label -> (label, StringHashtbl.find result_blocks label))
+
+    let program ?stack_size ?conflicts ?moves blocks =
+      let blocks = program_helper blocks in
       X86.program ?stack_size ?conflicts ?moves blocks
   end
 end
 
-module UncoverLive (F : X86_1) = struct
+module UncoverLive (F : X86_1) : X86_1 with type 'a obs = 'a F.obs = struct
   module M = UncoverLivePass (F)
   include X86_1_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta

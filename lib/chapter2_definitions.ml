@@ -485,8 +485,8 @@ module X86_0_Pretty = struct
     match live_after with
     | Some live_after -> Format.asprintf "(%a)" pp_live_after live_after
     | None -> "()"
+  let enclose s = "(" ^ s ^ ")"
   let program_info stack_size conflicts moves =
-    let enclose s = "(" ^ s ^ ")" in
     let stack_info =
       match stack_size with
       | Some stack_size -> "(stack_size . " ^ string_of_int stack_size ^ ")"
@@ -503,18 +503,18 @@ module X86_0_Pretty = struct
       | Some moves -> Format.asprintf "(moves . %a)" (ArgMap.pp ArgSet.pp) moves
       | None -> ""
     in
-    enclose (stack_info ^ conflict_info ^ move_info)
+    stack_info ^ conflict_info ^ move_info
 
   let block ?live_after instrs =
     "(block " ^ block_info live_after ^ "\n" ^ String.concat "\n" instrs ^ ")"
-  let program ?stack_size ?conflicts ?moves body =
-    "(program "
-    ^ program_info stack_size conflicts moves
-    ^ " "
+
+  let program_helper info body =
+    "(program " ^ info ^ " "
     ^ String.concat "\n"
         (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
     ^ ")"
-
+  let program ?stack_size ?conflicts ?moves body =
+    program_helper (enclose (program_info stack_size conflicts moves)) body
   let observe s = s
 end
 
