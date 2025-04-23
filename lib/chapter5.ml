@@ -423,6 +423,7 @@ module type X86_2 = sig
   val program :
     ?locals:R3_Types.typ StringMap.t ->
     ?stack_size:int ->
+    ?root_stack_size:int ->
     ?conflicts:ArgSet.t ArgMap.t ->
     ?moves:ArgSet.t ArgMap.t ->
     (label * unit block) list ->
@@ -432,7 +433,8 @@ end
 module X86_1_of_X86_2 (X86 : X86_2) = struct
   include X86
   let program ?stack_size ?conflicts ?moves blocks =
-    program ~locals:StringMap.empty ?stack_size ?conflicts ?moves blocks
+    program ~locals:StringMap.empty ~root_stack_size:0 ?stack_size ?conflicts
+      ?moves blocks
 end
 
 module X86_2_T
@@ -453,9 +455,9 @@ struct
     Chapter4.X86_1_T (X_reg) (X_arg) (X_instr) (X_block) (X_program)
       (X86_1_of_X86_2 (F))
   let global_value label = X_arg.fwd @@ F.global_value label
-  let program ?locals ?stack_size ?conflicts ?moves blocks =
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks =
     X_program.fwd
-    @@ F.program ?locals ?stack_size ?conflicts ?moves
+    @@ F.program ?locals ?stack_size ?root_stack_size ?conflicts ?moves
     @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
 end
 
@@ -471,9 +473,9 @@ module X86_2_R_T (R : Chapter1.Reader) (F : X86_2) :
   module M = X86_1_of_X86_2 (F)
   include Chapter4.X86_1_R_T (R) (M)
   let global_value label _ = F.global_value label
-  let program ?locals ?stack_size ?conflicts ?moves blocks () =
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks () =
     let init = R.init () in
-    F.program ?locals ?stack_size ?conflicts ?moves
+    F.program ?locals ?stack_size ?root_stack_size ?conflicts ?moves
       (List.map (fun (l, b) -> (l, b init)) blocks)
 end
 
@@ -611,9 +613,9 @@ module UncoverLive (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
   module M = Chapter4.UncoverLivePass (X86_1_of_X86_2 (F))
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
-  let program ?locals ?stack_size ?conflicts ?moves blocks =
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks =
     let blocks = program_helper blocks in
-    F.program ?locals ?stack_size ?conflicts ?moves blocks
+    F.program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks
 end
 
 module ArgMap = Chapter2_definitions.ArgMap
@@ -625,8 +627,8 @@ module BuildInterferencePass (X86 : X86_2) = struct
 
     let callee_saves = X86.[ rbx; r12; r13; r14; r15; rsp; rbp ]
 
-    let program ?(locals = StringMap.empty) ?stack_size ?conflicts:_ ?moves
-        blocks =
+    let program ?(locals = StringMap.empty) ?stack_size ?root_stack_size
+        ?conflicts:_ ?moves blocks =
       let interference_graph =
         (* If a vector typed variable is live during a call to the collector,
            it must be spilled to ensure it is visible to the collector.
@@ -650,8 +652,8 @@ module BuildInterferencePass (X86 : X86_2) = struct
           interference_graph blocks
       in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
-      X86.program ~locals ?stack_size ~conflicts:interference_graph ?moves
-        blocks
+      X86.program ~locals ?stack_size ?root_stack_size
+        ~conflicts:interference_graph ?moves blocks
   end
 end
 module BuildInterference (F : X86_2) = struct
@@ -664,9 +666,9 @@ module BuildMoves (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
   module M = Chapter4.BuildMovesPass (X86_1_of_X86_2 (F))
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
-  let program ?locals ?stack_size ?conflicts ?moves:_ blocks =
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves:_ blocks =
     let moves, blocks = program_helper blocks in
-    F.program ?locals ?stack_size ?conflicts ~moves blocks
+    F.program ?locals ?stack_size ?root_stack_size ?conflicts ~moves blocks
 end
 
 module AllocateRegistersPass (X86 : X86_2) = struct
@@ -682,7 +684,7 @@ module AllocateRegistersPass (X86 : X86_2) = struct
         | `Vector _ -> spill root_stack_size color_slot_table X86.r15 color
         | _ -> reg_of_color stack_size color_slot_table color
 
-    let program ?(locals = StringMap.empty) ?stack_size:_
+    let program ?(locals = StringMap.empty) ?stack_size:_ ?root_stack_size:_
         ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) blocks () =
       let root_stack_size = ref 0 in
       let stack_size = ref 0 in
@@ -710,7 +712,8 @@ module AllocateRegistersPass (X86 : X86_2) = struct
         try List.map (fun (l, b) -> (l, b ())) blocks
         with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
       in
-      X86.program ~stack_size:!stack_size blocks
+      X86.program ~stack_size:!stack_size ~root_stack_size:!root_stack_size
+        blocks
   end
 end
 module AllocateRegisters (X86 : X86_2) : X86_2 with type 'a obs = 'a X86.obs =
@@ -719,7 +722,8 @@ struct
   include X86_2_R_T (M.X_reader) (X86)
   include M.IDelta
 end
-module PatchInstructions (F : X86_2) = struct
+module PatchInstructions (F : X86_2) : X86_2 with type 'a obs = 'a F.obs =
+struct
   module M = Chapter4.PatchInstructionsPass (X86_1_of_X86_2 (F))
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
@@ -789,10 +793,15 @@ module X86_2_Pretty = struct
       in
       Format.asprintf "(locals . %a)" (Format.pp_print_list pp_pair) locals
     | None -> ""
+  let root_stack_info = function
+    | Some stack_size -> "(root_stack_size . " ^ string_of_int stack_size ^ ")"
+    | None -> ""
 
-  let program ?locals ?stack_size ?conflicts ?moves body =
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves body =
     let info =
-      enclose @@ locals_info locals ^ program_info stack_size conflicts moves
+      enclose @@ locals_info locals
+      ^ root_stack_info root_stack_size
+      ^ program_info stack_size conflicts moves
     in
     program_helper info body
 end
@@ -972,7 +981,7 @@ let%expect_test "Ex2 allocate registers" =
   Format.printf "Ex2: %s" M.res;
   [%expect
     {|
-    Ex2: (program ((stack_size . 0)) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
+    Ex2: (program ((root_stack_size . 0)(stack_size . 0)) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
       }; {}; {}])
     (movq (global-value free_ptr) (reg rcx))
     (movq (int 24) (reg rbx))
