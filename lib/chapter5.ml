@@ -697,7 +697,9 @@ module AllocateRegistersPass (X86 : X86_2) = struct
         |> ArgMap.map (ArgSet.remove r11)
         |> ArgMap.map (ArgSet.remove r15)
       in
-      let vars = ArgMap.keys conflicts in
+      let vars =
+        List.map (fun (v, _) -> Arg.Var v) (StringMap.bindings locals)
+      in
       let colors = GraphUtils.color_graph moves conflicts vars in
       let get_arg v =
         let color = ArgMap.find_var v colors in
@@ -708,13 +710,18 @@ module AllocateRegistersPass (X86 : X86_2) = struct
         try List.map (fun (l, b) -> (l, b ())) blocks
         with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
       in
-      X86.program ~stack_size:!stack_size ~conflicts ~moves blocks
+      X86.program ~stack_size:!stack_size blocks
   end
 end
 module AllocateRegisters (X86 : X86_2) : X86_2 with type 'a obs = 'a X86.obs =
 struct
   module M = AllocateRegistersPass (X86)
   include X86_2_R_T (M.X_reader) (X86)
+  include M.IDelta
+end
+module PatchInstructions (F : X86_2) = struct
+  module M = Chapter4.PatchInstructionsPass (X86_1_of_X86_2 (F))
+  include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
 end
 
@@ -950,13 +957,87 @@ let%expect_test "Ex2 allocate registers" =
          (Shrink
             (ExposeAllocation
                (RemoveComplex
-                  (ExplicateControl
-                     (R3_Collect_Pretty ())
-                     (UncoverLocals
-                        (SelectInstructions
-                           (C2_Pretty)
-                           (UncoverLive
-                              (BuildInterference
-                                 (BuildMoves (AllocateRegisters (X86_2_Pretty)))))))
-                     ()))))) in
-  Format.printf "Ex2: %s" M.res
+                  (R3_Collect_Annotate_Types
+                     (ExplicateControl
+                        (R3_Collect_Pretty ())
+                        (UncoverLocals
+                           (SelectInstructions
+                              (C2_Pretty)
+                              (UncoverLive
+                                 (BuildInterference
+                                    (BuildMoves
+                                       (AllocateRegisters
+                                          (PatchInstructions (X86_2_Pretty))))))))
+                        ())))))) in
+  Format.printf "Ex2: %s" M.res;
+  [%expect
+    {|
+    Ex2: (program ((stack_size . 0)) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
+      }; {}; {}])
+    (movq (global-value free_ptr) (reg rcx))
+    (movq (int 24) (reg rbx))
+    (addq (reg rbx) (reg rcx))
+    (movq (global-value fromspace_end) (reg rbx))
+    (cmpq (reg rbx) (reg rcx))
+    (jmp-if Chapter4.CC.L block_t8)
+    (jmp block_f9)))
+    (block_t8 . (block ([{}; {}])
+    (jmp block_t6)))
+    (block_f9 . (block ([{}; {}])
+    (jmp block_f7)))
+    (block_t6 . (block ([{}; {}; {}])
+    (movq (int 0) (reg rbx))
+    (jmp block_body5)))
+    (block_f7 . (block ([{}; {}; {}; {}; {}])
+    (movq (reg r15) (reg rdi))
+    (movq (int 24) (reg rsi))
+    (callq collect)
+    (jmp block_body5)))
+    (block_body5 . (block ([{}; {tmp5}; {tmp5}; {tmp5}; {tmp5}; {tmp3; tmp5}; {tmp3; tmp4; tmp5};
+      {tmp16; tmp4; tmp5}; {tmp16; tmp5}; {tmp16; tmp17; tmp5}; {tmp5}; {
+      tmp5}; {tmp5}])
+    (movq (global-value free_ptr) (reg rcx))
+    (addq (int 16) (global-value free_ptr))
+    (movq (reg rcx) (reg r11))
+    (movq (int 131) (deref r11 0))
+    (movq (global-value free_ptr) (reg rdx))
+    (movq (int 16) (reg rbx))
+    (addq (reg rbx) (reg rdx))
+    (movq (global-value fromspace_end) (reg rbx))
+    (cmpq (reg rbx) (reg rdx))
+    (jmp-if Chapter4.CC.L block_t3)
+    (jmp block_f4)))
+    (block_t3 . (block ([{tmp5}; {tmp5}])
+    (jmp block_t1)))
+    (block_f4 . (block ([{tmp5}; {tmp5}])
+    (jmp block_f2)))
+    (block_t1 . (block ([{tmp5}; {tmp5}; {tmp5}])
+    (movq (int 0) (reg rbx))
+    (jmp block_body0)))
+    (block_f2 . (block ([{tmp5}; {tmp5}; {tmp5}; {tmp5}; {tmp5}])
+    (movq (reg r15) (reg rdi))
+    (movq (int 16) (reg rsi))
+    (callq collect)
+    (jmp block_body0)))
+    (block_body0 . (block ([{tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
+      {tmp0; tmp15; tmp5}; {tmp0; tmp15; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
+      {tmp0; tmp5}; {tmp5}; {tmp5}; {}; {tmp10}; {}; {}; {}])
+    (movq (global-value free_ptr) (reg rdx))
+    (addq (int 16) (global-value free_ptr))
+    (movq (reg rdx) (reg r11))
+    (movq (int 3) (deref r11 0))
+    (movq (int 42) (reg rbx))
+    (movq (reg rdx) (reg r11))
+    (movq (reg rbx) (deref r11 8))
+    (movq (int 0) (reg rbx))
+    (movq (reg rcx) (reg r11))
+    (movq (reg rdx) (deref r11 8))
+    (movq (int 0) (reg rbx))
+    (movq (reg rcx) (reg r11))
+    (movq (deref r11 8) (reg rbx))
+    (movq (reg rbx) (reg r11))
+    (movq (deref r11 8) (reg rax))
+    (jmp block_exit)))
+    (block_exit . (block ([{}; {}])
+    (retq))))
+    |}]
