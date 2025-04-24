@@ -235,9 +235,15 @@ module Arg = struct
   open Ppx_hash_lib.Std.Hash.Builtin
 
   type t =
-    | Reg of int
+    | Reg of string
     | Var of string
-  [@@deriving show, ord, eq, hash]
+  [@@deriving ord, eq, hash]
+
+  let pp fmt = function
+    | Reg reg -> Format.fprintf fmt "Reg %s" reg
+    | Var var -> Format.fprintf fmt "Var %s" var
+
+  let show = Format.asprintf "%a" pp
 end
 
 module ArgSet = struct
@@ -314,6 +320,30 @@ module type X86_0 = sig
 
   type 'a obs
   val observe : 'a program -> 'a obs
+end
+
+module X86_Reg_String (X86 : X86_0) = struct
+  let string_of_reg : 'a. 'a X86.reg -> string =
+   fun reg ->
+    let reg = Hashtbl.hash reg in
+    match reg with
+    | reg when reg = Hashtbl.hash X86.rsp -> "rsp"
+    | reg when reg = Hashtbl.hash X86.rbp -> "rbp"
+    | reg when reg = Hashtbl.hash X86.rax -> "rax"
+    | reg when reg = Hashtbl.hash X86.rbx -> "rbx"
+    | reg when reg = Hashtbl.hash X86.rcx -> "rcx"
+    | reg when reg = Hashtbl.hash X86.rdx -> "rdx"
+    | reg when reg = Hashtbl.hash X86.rsi -> "rsi"
+    | reg when reg = Hashtbl.hash X86.rdi -> "rdi"
+    | reg when reg = Hashtbl.hash X86.r8 -> "r8"
+    | reg when reg = Hashtbl.hash X86.r9 -> "r9"
+    | reg when reg = Hashtbl.hash X86.r10 -> "r10"
+    | reg when reg = Hashtbl.hash X86.r11 -> "r11"
+    | reg when reg = Hashtbl.hash X86.r12 -> "r12"
+    | reg when reg = Hashtbl.hash X86.r13 -> "r13"
+    | reg when reg = Hashtbl.hash X86.r14 -> "r14"
+    | reg when reg = Hashtbl.hash X86.r15 -> "r15"
+    | _ -> failwith "Unknown register"
 end
 
 module X86_0_Reg_T

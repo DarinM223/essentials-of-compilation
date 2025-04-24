@@ -618,6 +618,7 @@ module UncoverLive (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
     F.program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks
 end
 
+module ArgSet = Chapter2_definitions.ArgSet
 module ArgMap = Chapter2_definitions.ArgMap
 module GraphUtils = Chapter3.GraphUtils
 module BuildInterferencePass (X86 : X86_2) = struct
@@ -626,6 +627,8 @@ module BuildInterferencePass (X86 : X86_2) = struct
     include IDelta
 
     let callee_saves = X86.[ rbx; r12; r13; r14; r15; rsp; rbp ]
+
+    include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
 
     let program ?(locals = StringMap.empty) ?stack_size ?root_stack_size
         ?conflicts:_ ?moves blocks =
@@ -639,10 +642,12 @@ module BuildInterferencePass (X86 : X86_2) = struct
           match typ with
           | `Vector _ ->
             let add_register_interference acc reg =
-              GraphUtils.add_interference (Reg (Hashtbl.hash reg)) (Var var) acc
+              GraphUtils.add_interference
+                (Reg (string_of_reg reg))
+                (Var var) acc
             in
             List.fold_left add_register_interference graph callee_saves
-          | _ -> graph
+          | _ -> ArgMap.add (Var var) ArgSet.empty graph
         in
         StringMap.fold add_pointer_interferences locals ArgMap.empty
       in
@@ -676,13 +681,17 @@ module AllocateRegistersPass (X86 : X86_2) = struct
   module IDelta = struct
     include IDelta
     open Chapter2_definitions
-    let reg_of_color root_stack_size stack_size color_slot_table typ color =
-      if color >= 0 && color <= 12 then
-        reg_of_color stack_size color_slot_table color
+    let regs = X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r12; r13; r14 |]
+    let reg_of_color root_stack_size stack_size color_slot_table regs typ color
+        =
+      if color < Array.length regs then
+        X86.reg regs.(color)
       else
         match typ with
         | `Vector _ -> spill root_stack_size color_slot_table X86.r15 color
-        | _ -> reg_of_color stack_size color_slot_table color
+        | _ -> spill stack_size color_slot_table X86.rbp color
+
+    include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
 
     let program ?(locals = StringMap.empty) ?stack_size:_ ?root_stack_size:_
         ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) blocks () =
@@ -690,30 +699,29 @@ module AllocateRegistersPass (X86 : X86_2) = struct
       let stack_size = ref 0 in
       let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
       (* Remove rax, r11, and r15 from the interference graph *)
-      let rax = Arg.Reg (Hashtbl.hash X86.rax) in
-      let r11 = Arg.Reg (Hashtbl.hash X86.r11) in
-      let r15 = Arg.Reg (Hashtbl.hash X86.r15) in
+      let rax = Arg.Reg (string_of_reg X86.rax) in
+      let r11 = Arg.Reg (string_of_reg X86.r11) in
+      let r15 = Arg.Reg (string_of_reg X86.r15) in
       let conflicts =
         conflicts |> ArgMap.remove rax |> ArgMap.remove r11 |> ArgMap.remove r15
         |> ArgMap.map (ArgSet.remove rax)
         |> ArgMap.map (ArgSet.remove r11)
         |> ArgMap.map (ArgSet.remove r15)
       in
-      let vars =
-        List.map (fun (v, _) -> Arg.Var v) (StringMap.bindings locals)
-      in
+      let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
+      Format.printf "Colors: %a\n" (ArgMap.pp Format.pp_print_int) colors;
       let get_arg v =
         let color = ArgMap.find_var v colors in
         let typ = StringMap.find v locals in
-        reg_of_color root_stack_size stack_size color_slot_table typ color
+        reg_of_color root_stack_size stack_size color_slot_table regs typ color
       in
       let blocks =
         try List.map (fun (l, b) -> (l, b ())) blocks
         with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
       in
-      X86.program ~stack_size:!stack_size ~root_stack_size:!root_stack_size
-        blocks
+      X86.program ~locals ~stack_size:!stack_size
+        ~root_stack_size:!root_stack_size ~conflicts ~moves blocks
   end
 end
 module AllocateRegisters (X86 : X86_2) : X86_2 with type 'a obs = 'a X86.obs =
@@ -979,9 +987,52 @@ let%expect_test "Ex2 allocate registers" =
                                           (PatchInstructions (X86_2_Pretty))))))))
                         ())))))) in
   Format.printf "Ex2: %s" M.res;
+  (* TODO: Debug coloring *)
   [%expect
     {|
-    Ex2: (program ((root_stack_size . 0)(stack_size . 0)) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
+    Colors: {Reg r10 -> 0; Reg r12 -> 0; Reg r13 -> 0; Reg r14 -> 0; Reg r8 -> 0;
+             Reg r9 -> 0; Reg rbp -> 0; Reg rbx -> 0; Reg rcx -> 0; Reg rdi -> 0;
+             Reg rdx -> 0; Reg rsi -> 0; Reg rsp -> 0; Var tmp0 -> 2;
+             Var tmp1 -> 0; Var tmp10 -> 1; Var tmp15 -> 0; Var tmp16 -> 2;
+             Var tmp17 -> 0; Var tmp2 -> 0; Var tmp20 -> 1; Var tmp21 -> 0;
+             Var tmp3 -> 2; Var tmp4 -> 0; Var tmp5 -> 1; Var tmp6 -> 0;
+             Var tmp7 -> 0; Var tmp8 -> 1; Var tmp9 -> 0}
+    Ex2: (program ((locals . (tmp0 . `Vector ([`Int]))(tmp1 . `Void)(tmp10 . `Vector ([`Int]))
+    (tmp15 . `Int)(tmp16 . `Int)(tmp17 . `Int)(tmp2 . `Void)(tmp20 . `Int)
+    (tmp21 . `Int)(tmp3 . `Int)(tmp4 . `Int)(tmp5 . `Vector ([`Vector ([`Int])]))
+    (tmp6 . `Void)(tmp7 . `Void)(tmp8 . `Int)
+    (tmp9 . `Int))(root_stack_size . 0)(stack_size . 0)(conflicts . {Reg r10 -> {Var tmp5};
+                  Reg r12 -> {Var tmp0; Var tmp10; Var tmp5};
+                  Reg r13 -> {Var tmp0; Var tmp10; Var tmp5};
+                  Reg r14 -> {Var tmp0; Var tmp10; Var tmp5};
+                  Reg r8 -> {Var tmp5}; Reg r9 -> {Var tmp5};
+                  Reg rbp -> {Var tmp0; Var tmp10; Var tmp5};
+                  Reg rbx -> {Var tmp0; Var tmp10; Var tmp5};
+                  Reg rcx -> {Var tmp5}; Reg rdi -> {Var tmp5};
+                  Reg rdx -> {Var tmp5}; Reg rsi -> {Var tmp5};
+                  Reg rsp -> {Var tmp0; Var tmp10; Var tmp5};
+                  Var tmp0 -> {Reg r12; Reg r13; Reg r14; Reg rbp; Reg rbx;
+                               Reg rsp; Var tmp1; Var tmp15; Var tmp5};
+                  Var tmp1 -> {Var tmp0; Var tmp5};
+                  Var tmp10 -> {Reg r12; Reg r13; Reg r14; Reg rbp; Reg rbx;
+                                Reg rsp};
+                  Var tmp15 -> {Var tmp0; Var tmp5};
+                  Var tmp16 -> {Var tmp17; Var tmp4; Var tmp5};
+                  Var tmp17 -> {Var tmp16; Var tmp5}; Var tmp2 -> {Var tmp5};
+                  Var tmp20 -> {Var tmp21; Var tmp9}; Var tmp21 -> {Var tmp20};
+                  Var tmp3 -> {Var tmp4; Var tmp5};
+                  Var tmp4 -> {Var tmp16; Var tmp3; Var tmp5};
+                  Var tmp5 -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8;
+                               Reg r9; Reg rbp; Reg rbx; Reg rcx; Reg rdi;
+                               Reg rdx; Reg rsi; Reg rsp; Var tmp0; Var tmp1;
+                               Var tmp15; Var tmp16; Var tmp17; Var tmp2;
+                               Var tmp3; Var tmp4; Var tmp6};
+                  Var tmp6 -> {Var tmp5}; Var tmp7 -> {}; Var tmp8 -> {Var tmp9};
+                  Var tmp9 -> {Var tmp20; Var tmp8}})(moves . {Reg r11 -> {Var tmp0; Var tmp10; Var tmp5}; Reg r15 -> {Reg rdi};
+              Reg rdi -> {Reg r15}; Var tmp0 -> {Reg r11};
+              Var tmp10 -> {Reg r11}; Var tmp16 -> {Var tmp3};
+              Var tmp20 -> {Var tmp8}; Var tmp3 -> {Var tmp16};
+              Var tmp5 -> {Reg r11}; Var tmp8 -> {Var tmp20}})) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
       }; {}; {}])
     (movq (global-value free_ptr) (reg rcx))
     (movq (int 24) (reg rbx))
@@ -1043,8 +1094,8 @@ let%expect_test "Ex2 allocate registers" =
     (movq (reg rdx) (deref r11 8))
     (movq (int 0) (reg rbx))
     (movq (reg rcx) (reg r11))
-    (movq (deref r11 8) (reg rbx))
-    (movq (reg rbx) (reg r11))
+    (movq (deref r11 8) (reg rcx))
+    (movq (reg rcx) (reg r11))
     (movq (deref r11 8) (reg rax))
     (jmp block_exit)))
     (block_exit . (block ([{}; {}])

@@ -190,7 +190,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
   module IDelta = struct
-    let arg_of_reg reg = Arg.Reg (Hashtbl.hash reg)
+    include Chapter2_definitions.X86_Reg_String (X86)
+    let arg_of_reg reg = Arg.Reg (string_of_reg reg)
     let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
 
@@ -316,7 +317,8 @@ module BuildMovesPass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
   module IDelta = struct
-    let arg_of_reg reg = Arg.Reg (Hashtbl.hash reg)
+    include Chapter2_definitions.X86_Reg_String (X86)
+    let arg_of_reg reg = Arg.Reg (string_of_reg reg)
     let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
     let movq (arg1, a) (arg2, b) =
@@ -370,35 +372,30 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       in
       X86.deref reg slot
 
-    let reg_of_color stack_size color_slot_table = function
-      | 0 -> X86.(reg rbx)
-      | 1 -> X86.(reg rcx)
-      | 2 -> X86.(reg rdx)
-      | 3 -> X86.(reg rsi)
-      | 4 -> X86.(reg rdi)
-      | 5 -> X86.(reg r8)
-      | 6 -> X86.(reg r9)
-      | 7 -> X86.(reg r10)
-      | 8 -> X86.(reg r11)
-      | 9 -> X86.(reg r12)
-      | 10 -> X86.(reg r13)
-      | 11 -> X86.(reg r14)
-      | 12 -> X86.(reg r15)
-      | color -> spill stack_size color_slot_table X86.rbp color
+    let regs =
+      X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r11; r12; r13; r14; r15 |]
+
+    let reg_of_color stack_size color_slot_table regs color =
+      if color < Array.length regs then
+        X86.reg regs.(color)
+      else
+        spill stack_size color_slot_table X86.rbp color
+
+    include Chapter2_definitions.X86_Reg_String (X86)
 
     let program ?stack_size:_ ?(conflicts = ArgMap.empty)
         ?(moves = ArgMap.empty) blocks () =
       let stack_size = ref 0 in
       let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
       (* Remove rax from the interference graph *)
-      let rax = Arg.Reg (Hashtbl.hash X86.rax) in
+      let rax = Arg.Reg (string_of_reg X86.rax) in
       let conflicts =
         conflicts |> ArgMap.remove rax |> ArgMap.map (ArgSet.remove rax)
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
       let get_arg v =
-        reg_of_color stack_size color_slot_table (ArgMap.find_var v colors)
+        reg_of_color stack_size color_slot_table regs (ArgMap.find_var v colors)
       in
       let blocks =
         try List.map (fun (l, b) -> (l, b ())) blocks
@@ -469,38 +466,10 @@ let%expect_test "Example 1 after build interference" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((conflicts . {(Chapter2_definitions.Arg.Reg 235514213) -> {(Chapter2_definitions.Arg.Var
-                                                                  "t.1")};
-                  (Chapter2_definitions.Arg.Var "t.1") -> {(Chapter2_definitions.Arg.Reg
-                                                              235514213);
-                                                           (Chapter2_definitions.Arg.Var
-                                                              "z")};
-                  (Chapter2_definitions.Arg.Var "v") -> {(Chapter2_definitions.Arg.Var
-                                                            "w")};
-                  (Chapter2_definitions.Arg.Var "w") -> {(Chapter2_definitions.Arg.Var
-                                                            "v");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "x");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "y");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "z")};
-                  (Chapter2_definitions.Arg.Var "x") -> {(Chapter2_definitions.Arg.Var
-                                                            "w");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "y")};
-                  (Chapter2_definitions.Arg.Var "y") -> {(Chapter2_definitions.Arg.Var
-                                                            "w");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "x");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "z")};
-                  (Chapter2_definitions.Arg.Var "z") -> {(Chapter2_definitions.Arg.Var
-                                                            "t.1");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "w");
-                                                         (Chapter2_definitions.Arg.Var
-                                                            "y")}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
+    Ex1: (program ((conflicts . {Reg rax -> {Var t.1}; Var t.1 -> {Reg rax; Var z};
+                  Var v -> {Var w}; Var w -> {Var v; Var x; Var y; Var z};
+                  Var x -> {Var w; Var y}; Var y -> {Var w; Var x; Var z};
+                  Var z -> {Var t.1; Var w; Var y}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
       y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
