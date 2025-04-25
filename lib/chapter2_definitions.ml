@@ -235,8 +235,8 @@ module Arg = struct
   open Ppx_hash_lib.Std.Hash.Builtin
 
   type t =
-    | Reg of string
     | Var of string
+    | Reg of string
   [@@deriving ord, eq, hash]
 
   let pp fmt = function

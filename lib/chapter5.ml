@@ -626,7 +626,7 @@ module BuildInterferencePass (X86 : X86_2) = struct
   module IDelta = struct
     include IDelta
 
-    let callee_saves = X86.[ rbx; r12; r13; r14; r15; rsp; rbp ]
+    let callee_saves = X86.[ rbx; r12; r13; r14; r15 ]
 
     include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
 
@@ -637,7 +637,16 @@ module BuildInterferencePass (X86 : X86_2) = struct
            it must be spilled to ensure it is visible to the collector.
            This is done by adding interferences for vector typed variables
            to all callee save registers so it must be spilled into a stack slot.
+           Also, to prevent root stack slots sharing colors with stack slots,
+           interferences are added between all vector typed variables and
+           non vector typed variables.
          *)
+        let non_pointer_locals =
+          locals |> StringMap.bindings
+          |> List.filter_map (function
+               | _, `Vector _ -> None
+               | v, _ -> Some v)
+        in
         let add_pointer_interferences var typ graph =
           match typ with
           | `Vector _ ->
@@ -646,10 +655,15 @@ module BuildInterferencePass (X86 : X86_2) = struct
                 (Reg (string_of_reg reg))
                 (Var var) acc
             in
-            List.fold_left add_register_interference graph callee_saves
+            let add_var_interference acc var' =
+              GraphUtils.add_interference (Var var') (Var var) acc
+            in
+            List.fold_left add_var_interference
+              (List.fold_left add_register_interference graph callee_saves)
+              non_pointer_locals
           | _ -> ArgMap.add (Var var) ArgSet.empty graph
         in
-        StringMap.fold add_pointer_interferences locals ArgMap.empty
+        StringMap.fold add_pointer_interferences locals init_interference_graph
       in
       let interference_graph =
         List.fold_left
@@ -710,7 +724,6 @@ module AllocateRegistersPass (X86 : X86_2) = struct
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
-      Format.printf "Colors: %a\n" (ArgMap.pp Format.pp_print_int) colors;
       let get_arg v =
         let color = ArgMap.find_var v colors in
         let typ = StringMap.find v locals in
@@ -987,52 +1000,67 @@ let%expect_test "Ex2 allocate registers" =
                                           (PatchInstructions (X86_2_Pretty))))))))
                         ())))))) in
   Format.printf "Ex2: %s" M.res;
-  (* TODO: Debug coloring *)
   [%expect
     {|
-    Colors: {Reg r10 -> 0; Reg r12 -> 0; Reg r13 -> 0; Reg r14 -> 0; Reg r8 -> 0;
-             Reg r9 -> 0; Reg rbp -> 0; Reg rbx -> 0; Reg rcx -> 0; Reg rdi -> 0;
-             Reg rdx -> 0; Reg rsi -> 0; Reg rsp -> 0; Var tmp0 -> 2;
-             Var tmp1 -> 0; Var tmp10 -> 1; Var tmp15 -> 0; Var tmp16 -> 2;
-             Var tmp17 -> 0; Var tmp2 -> 0; Var tmp20 -> 1; Var tmp21 -> 0;
-             Var tmp3 -> 2; Var tmp4 -> 0; Var tmp5 -> 1; Var tmp6 -> 0;
-             Var tmp7 -> 0; Var tmp8 -> 1; Var tmp9 -> 0}
     Ex2: (program ((locals . (tmp0 . `Vector ([`Int]))(tmp1 . `Void)(tmp10 . `Vector ([`Int]))
     (tmp15 . `Int)(tmp16 . `Int)(tmp17 . `Int)(tmp2 . `Void)(tmp20 . `Int)
     (tmp21 . `Int)(tmp3 . `Int)(tmp4 . `Int)(tmp5 . `Vector ([`Vector ([`Int])]))
     (tmp6 . `Void)(tmp7 . `Void)(tmp8 . `Int)
-    (tmp9 . `Int))(root_stack_size . 0)(stack_size . 0)(conflicts . {Reg r10 -> {Var tmp5};
-                  Reg r12 -> {Var tmp0; Var tmp10; Var tmp5};
-                  Reg r13 -> {Var tmp0; Var tmp10; Var tmp5};
-                  Reg r14 -> {Var tmp0; Var tmp10; Var tmp5};
-                  Reg r8 -> {Var tmp5}; Reg r9 -> {Var tmp5};
-                  Reg rbp -> {Var tmp0; Var tmp10; Var tmp5};
-                  Reg rbx -> {Var tmp0; Var tmp10; Var tmp5};
-                  Reg rcx -> {Var tmp5}; Reg rdi -> {Var tmp5};
-                  Reg rdx -> {Var tmp5}; Reg rsi -> {Var tmp5};
-                  Reg rsp -> {Var tmp0; Var tmp10; Var tmp5};
-                  Var tmp0 -> {Reg r12; Reg r13; Reg r14; Reg rbp; Reg rbx;
-                               Reg rsp; Var tmp1; Var tmp15; Var tmp5};
-                  Var tmp1 -> {Var tmp0; Var tmp5};
-                  Var tmp10 -> {Reg r12; Reg r13; Reg r14; Reg rbp; Reg rbx;
-                                Reg rsp};
+    (tmp9 . `Int))(root_stack_size . 8)(stack_size . 0)(conflicts . {Var tmp0 -> {Var tmp1; Var tmp15; Var tmp16; Var tmp17;
+                               Var tmp2; Var tmp20; Var tmp21; Var tmp3;
+                               Var tmp4; Var tmp5; Var tmp6; Var tmp7; Var tmp8;
+                               Var tmp9; Reg r12; Reg r13; Reg r14; Reg rbx};
+                  Var tmp1 -> {Var tmp0; Var tmp10; Var tmp5};
+                  Var tmp10 -> {Var tmp1; Var tmp15; Var tmp16; Var tmp17;
+                                Var tmp2; Var tmp20; Var tmp21; Var tmp3;
+                                Var tmp4; Var tmp6; Var tmp7; Var tmp8; Var tmp9;
+                                Reg r12; Reg r13; Reg r14; Reg rbx};
                   Var tmp15 -> {Var tmp0; Var tmp5};
                   Var tmp16 -> {Var tmp17; Var tmp4; Var tmp5};
                   Var tmp17 -> {Var tmp16; Var tmp5}; Var tmp2 -> {Var tmp5};
-                  Var tmp20 -> {Var tmp21; Var tmp9}; Var tmp21 -> {Var tmp20};
+                  Var tmp20 -> {Var tmp21; Var tmp5; Var tmp9};
+                  Var tmp21 -> {Var tmp20; Var tmp5};
                   Var tmp3 -> {Var tmp4; Var tmp5};
                   Var tmp4 -> {Var tmp16; Var tmp3; Var tmp5};
-                  Var tmp5 -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8;
-                               Reg r9; Reg rbp; Reg rbx; Reg rcx; Reg rdi;
-                               Reg rdx; Reg rsi; Reg rsp; Var tmp0; Var tmp1;
-                               Var tmp15; Var tmp16; Var tmp17; Var tmp2;
-                               Var tmp3; Var tmp4; Var tmp6};
+                  Var tmp5 -> {Var tmp0; Var tmp1; Var tmp15; Var tmp16;
+                               Var tmp17; Var tmp2; Var tmp20; Var tmp21;
+                               Var tmp3; Var tmp4; Var tmp6; Var tmp7; Var tmp8;
+                               Var tmp9; Reg r10; Reg r12; Reg r13; Reg r14;
+                               Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                               Reg rdx; Reg rsi};
                   Var tmp6 -> {Var tmp5}; Var tmp7 -> {}; Var tmp8 -> {Var tmp9};
-                  Var tmp9 -> {Var tmp20; Var tmp8}})(moves . {Reg r11 -> {Var tmp0; Var tmp10; Var tmp5}; Reg r15 -> {Reg rdi};
-              Reg rdi -> {Reg r15}; Var tmp0 -> {Reg r11};
-              Var tmp10 -> {Reg r11}; Var tmp16 -> {Var tmp3};
-              Var tmp20 -> {Var tmp8}; Var tmp3 -> {Var tmp16};
-              Var tmp5 -> {Reg r11}; Var tmp8 -> {Var tmp20}})) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
+                  Var tmp9 -> {Var tmp20; Var tmp8};
+                  Reg r10 -> {Var tmp5; Reg r12; Reg r13; Reg r14; Reg r8;
+                              Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r12 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rdx; Reg rsi};
+                  Reg r13 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rdx; Reg rsi};
+                  Reg r14 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
+                              Reg r13; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rdx; Reg rsi};
+                  Reg r8 -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                             Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r9 -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                             Reg r8; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg rbx -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
+                              Reg r13; Reg r14; Reg r8; Reg r9; Reg rcx; Reg rdi;
+                              Reg rdx; Reg rsi};
+                  Reg rcx -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg rdi -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdx; Reg rsi};
+                  Reg rdx -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rsi};
+                  Reg rsi -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx}})(moves . {Var tmp0 -> {Reg r11}; Var tmp10 -> {Reg r11};
+              Var tmp16 -> {Var tmp3}; Var tmp20 -> {Var tmp8};
+              Var tmp3 -> {Var tmp16}; Var tmp5 -> {Reg r11};
+              Var tmp8 -> {Var tmp20};
+              Reg r11 -> {Var tmp0; Var tmp10; Var tmp5}; Reg r15 -> {Reg rdi};
+              Reg rdi -> {Reg r15}})) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
       }; {}; {}])
     (movq (global-value free_ptr) (reg rcx))
     (movq (int 24) (reg rbx))
@@ -1056,15 +1084,15 @@ let%expect_test "Ex2 allocate registers" =
     (block_body5 . (block ([{}; {tmp5}; {tmp5}; {tmp5}; {tmp5}; {tmp3; tmp5}; {tmp3; tmp4; tmp5};
       {tmp16; tmp4; tmp5}; {tmp16; tmp5}; {tmp16; tmp17; tmp5}; {tmp5}; {
       tmp5}; {tmp5}])
-    (movq (global-value free_ptr) (reg rcx))
+    (movq (global-value free_ptr) (deref r15 -8))
     (addq (int 16) (global-value free_ptr))
-    (movq (reg rcx) (reg r11))
+    (movq (deref r15 -8) (reg r11))
     (movq (int 131) (deref r11 0))
-    (movq (global-value free_ptr) (reg rdx))
+    (movq (global-value free_ptr) (reg rcx))
     (movq (int 16) (reg rbx))
-    (addq (reg rbx) (reg rdx))
+    (addq (reg rbx) (reg rcx))
     (movq (global-value fromspace_end) (reg rbx))
-    (cmpq (reg rbx) (reg rdx))
+    (cmpq (reg rbx) (reg rcx))
     (jmp-if Chapter4.CC.L block_t3)
     (jmp block_f4)))
     (block_t3 . (block ([{tmp5}; {tmp5}])
@@ -1082,20 +1110,20 @@ let%expect_test "Ex2 allocate registers" =
     (block_body0 . (block ([{tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
       {tmp0; tmp15; tmp5}; {tmp0; tmp15; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
       {tmp0; tmp5}; {tmp5}; {tmp5}; {}; {tmp10}; {}; {}; {}])
-    (movq (global-value free_ptr) (reg rdx))
+    (movq (global-value free_ptr) (reg rbx))
     (addq (int 16) (global-value free_ptr))
-    (movq (reg rdx) (reg r11))
+    (movq (reg rbx) (reg r11))
     (movq (int 3) (deref r11 0))
-    (movq (int 42) (reg rbx))
-    (movq (reg rdx) (reg r11))
+    (movq (int 42) (reg rcx))
+    (movq (reg rbx) (reg r11))
+    (movq (reg rcx) (deref r11 8))
+    (movq (int 0) (reg rcx))
+    (movq (deref r15 -8) (reg r11))
     (movq (reg rbx) (deref r11 8))
     (movq (int 0) (reg rbx))
-    (movq (reg rcx) (reg r11))
-    (movq (reg rdx) (deref r11 8))
-    (movq (int 0) (reg rbx))
-    (movq (reg rcx) (reg r11))
-    (movq (deref r11 8) (reg rcx))
-    (movq (reg rcx) (reg r11))
+    (movq (deref r15 -8) (reg r11))
+    (movq (deref r11 8) (reg rbx))
+    (movq (reg rbx) (reg r11))
     (movq (deref r11 8) (reg rax))
     (jmp block_exit)))
     (block_exit . (block ([{}; {}])

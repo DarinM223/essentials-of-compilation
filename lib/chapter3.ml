@@ -274,9 +274,28 @@ module BuildInterferencePass (X86 : X86_0) = struct
       let instrs = List.map (fun (_, instr) -> instr) instrs in
       (acc_block, X86.block ?live_after instrs)
 
+    (* TODO: merge with regs from AllocateRegistersPass *)
+    let regs =
+      X86.[ rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r11; r12; r13; r14; r15 ]
+    let init_interference_graph =
+      let ( let* ) a f = List.concat_map f a in
+      let conflicts =
+        let* a = regs in
+        let* b = regs in
+        if arg_of_reg a = arg_of_reg b then
+          []
+        else
+          [ (arg_of_reg a, arg_of_reg b) ]
+      in
+      List.fold_left
+        (fun acc (a, b) -> GraphUtils.add_interference a b acc)
+        ArgMap.empty conflicts
+
     let program ?stack_size ?conflicts:_ ?moves blocks =
       let interference_graph =
-        List.fold_left (fun graph (_, (f, _)) -> f graph) ArgMap.empty blocks
+        List.fold_left
+          (fun graph (_, (f, _)) -> f graph)
+          init_interference_graph blocks
       in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
       X86.program ?stack_size ~conflicts:interference_graph ?moves blocks
@@ -466,10 +485,50 @@ let%expect_test "Example 1 after build interference" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((conflicts . {Reg rax -> {Var t.1}; Var t.1 -> {Reg rax; Var z};
-                  Var v -> {Var w}; Var w -> {Var v; Var x; Var y; Var z};
-                  Var x -> {Var w; Var y}; Var y -> {Var w; Var x; Var z};
-                  Var z -> {Var t.1; Var w; Var y}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
+    Ex1: (program ((conflicts . {Var t.1 -> {Var z; Reg rax}; Var v -> {Var w};
+                  Var w -> {Var v; Var x; Var y; Var z}; Var x -> {Var w; Var y};
+                  Var y -> {Var w; Var x; Var z};
+                  Var z -> {Var t.1; Var w; Var y};
+                  Reg r10 -> {Reg r11; Reg r12; Reg r13; Reg r14; Reg r15;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r11 -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r15;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r12 -> {Reg r10; Reg r11; Reg r13; Reg r14; Reg r15;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r13 -> {Reg r10; Reg r11; Reg r12; Reg r14; Reg r15;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r14 -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r15;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r15 -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r8 -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                             Reg r15; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg r9 -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                             Reg r15; Reg r8; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg rax -> {Var t.1};
+                  Reg rbx -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r15; Reg r8; Reg r9; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rcx -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r15; Reg r8; Reg r9; Reg rbx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rdi -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r15; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdx;
+                              Reg rsi};
+                  Reg rdx -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r15; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rsi};
+                  Reg rsi -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
+                              Reg r15; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rdx}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
       y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
