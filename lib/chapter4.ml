@@ -1001,6 +1001,7 @@ let%expect_test "Allocate Registers" =
     .global _start
     .text
     _start:
+      pushq %rbp
       movq %rsp, %rbp
       subq $8, %rsp
     start:
@@ -1079,6 +1080,7 @@ let%expect_test "Allocate Registers" =
       jmp block_exit
     block_exit:
 
-      addq $8, %rsp
+      movq %rbp, %rsp
+      popq %rbp
       retq
     |}]

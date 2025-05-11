@@ -555,6 +555,7 @@ let%expect_test "Example 1 after allocate registers" =
     .global _start
     .text
     _start:
+      pushq %rbp
       movq %rsp, %rbp
       subq $8, %rsp
     start:
@@ -571,7 +572,8 @@ let%expect_test "Example 1 after allocate registers" =
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
-      addq $8, %rsp
+      movq %rbp, %rsp
+      popq %rbp
       retq
     |}]
 
@@ -587,6 +589,7 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
     .global _start
     .text
     _start:
+      pushq %rbp
       movq %rsp, %rbp
       subq $8, %rsp
     start:
@@ -603,7 +606,8 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
-      addq $8, %rsp
+      movq %rbp, %rsp
+      popq %rbp
       retq
     |}]
 
@@ -622,6 +626,7 @@ let%expect_test
     .global _start
     .text
     _start:
+      pushq %rbp
       movq %rsp, %rbp
       subq $8, %rsp
     start:
@@ -635,6 +640,7 @@ let%expect_test
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
-      addq $8, %rsp
+      movq %rbp, %rsp
+      popq %rbp
       retq
     |}]

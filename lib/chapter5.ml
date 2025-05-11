@@ -827,6 +827,10 @@ module X86_2_Pretty = struct
     program_helper info body
 end
 
+module X86_2_Printer = struct
+  include Chapter4.X86_1_Printer
+end
+
 module Ex0 (F : R3_Let) = struct
   open F
   let res =

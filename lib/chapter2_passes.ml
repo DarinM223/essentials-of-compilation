@@ -308,9 +308,9 @@ end
 
 module ListUtils = struct
   let[@tail_mod_cons] rec add_before_end a = function
-    | [ last ] -> [ a; last ]
+    | [ last ] -> a @ [ last ]
     | x :: xs -> x :: add_before_end a xs
-    | [] -> [ a ]
+    | [] -> a
 end
 
 module X86_0_Printer = struct
@@ -360,26 +360,30 @@ module X86_0_Printer = struct
         let stack_size =
           if (stack_size + 8) mod 16 = 0 then stack_size else stack_size + 8
         in
-        ( [ "movq " ^ rsp ^ ", " ^ rbp; "subq " ^ int stack_size ^ ", " ^ rsp ],
-          "addq " ^ int stack_size ^ ", " ^ rsp ))
+        ( [ pushq rbp; movq rsp rbp; subq (int stack_size) rsp ],
+          [ movq rbp rsp; popq rbp ] ))
       stack_size
 
   let indent s = "  " ^ s
 
   let block ?live_after:_ = List.map indent
 
+  let apply_header_footer info instrs =
+    match info with
+    | Some (header, footer) ->
+      ListUtils.add_before_end (List.map indent footer)
+        (List.map indent header @ instrs)
+    | None -> instrs
+
+  let program_helper stack_size blocks =
+    blocks
+    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block)
+    |> apply_header_footer (program_info stack_size)
+
   let program ?stack_size ?conflicts:_ ?moves:_ blocks =
-    let instrs =
-      List.concat_map (fun (label, block) -> (label ^ ":\n") :: block) blocks
-    in
-    let instrs =
-      match program_info stack_size with
-      | Some (header, footer) ->
-        ListUtils.add_before_end ("  " ^ footer)
-          (List.map indent header @ instrs)
-      | None -> instrs
-    in
-    String.concat "\n" @@ [ ".global _start"; ".text"; "_start:" ] @ instrs
+    String.concat "\n"
+    @@ [ ".global _start"; ".text"; "_start:" ]
+    @ program_helper stack_size blocks
 
   let observe s = s
 end
@@ -530,6 +534,7 @@ let%expect_test "Example 6 final printed X86" =
     .global _start
     .text
     _start:
+      pushq %rbp
       movq %rsp, %rbp
       subq $24, %rsp
     start:
@@ -541,6 +546,7 @@ let%expect_test "Example 6 final printed X86" =
       movq -16(%rbp), %rax
       addq %rax, -24(%rbp)
       movq -24(%rbp), %rax
-      addq $24, %rsp
+      movq %rbp, %rsp
+      popq %rbp
       retq
     |}]
