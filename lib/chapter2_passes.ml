@@ -341,7 +341,9 @@ module X86_0_Printer = struct
   let r15 = "%r15"
 
   let reg r = r
-  let deref r i = string_of_int i ^ "(" ^ r ^ ")"
+  let deref r = function
+    | 0 -> "(" ^ r ^ ")"
+    | i -> string_of_int i ^ "(" ^ r ^ ")"
   let int i = "$" ^ string_of_int i
   let var v = failwith @@ "Invalid var in X86Printer: " ^ v
 

@@ -829,6 +829,41 @@ end
 
 module X86_2_Printer = struct
   include Chapter4.X86_1_Printer
+
+  let global_value label = "_" ^ label ^ "(%rip)"
+
+  (* TODO: how should these be calculated? *)
+  let root_stack_total_size = 16384
+  let root_stack_heap_size = 16
+
+  let program_info stack_size root_stack_size =
+    let add_root_stack (header, footer) =
+      match root_stack_size with
+      | Some stack_size ->
+        ( header
+          @ [
+              movq (int root_stack_total_size) rdi;
+              movq (int root_stack_heap_size) rsi;
+              callq "_initialize";
+              movq (global_value "rootstack_begin") r15;
+              movq (int 0) (deref r15 0);
+              addq (int stack_size) r15;
+            ],
+          footer @ [ subq (int stack_size) r15 ] )
+      | None -> (header, footer)
+    in
+    Option.map add_root_stack (program_info stack_size)
+
+  let program_helper stack_size root_stack_size blocks =
+    blocks
+    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block)
+    |> apply_header_footer (program_info stack_size root_stack_size)
+
+  let program ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_
+      blocks =
+    String.concat "\n"
+    @@ [ ".global _start"; ".text"; "_start:" ]
+    @ program_helper stack_size root_stack_size blocks
 end
 
 module Ex0 (F : R3_Let) = struct
@@ -1001,135 +1036,99 @@ let%expect_test "Ex2 allocate registers" =
                                  (BuildInterference
                                     (BuildMoves
                                        (AllocateRegisters
-                                          (PatchInstructions (X86_2_Pretty))))))))
+                                          (PatchInstructions (X86_2_Printer))))))))
                         ())))))) in
   Format.printf "Ex2: %s" M.res;
   [%expect
     {|
-    Ex2: (program ((locals . (tmp0 . `Vector ([`Int]))(tmp1 . `Void)(tmp10 . `Vector ([`Int]))
-    (tmp15 . `Int)(tmp16 . `Int)(tmp17 . `Int)(tmp2 . `Void)(tmp20 . `Int)
-    (tmp21 . `Int)(tmp3 . `Int)(tmp4 . `Int)(tmp5 . `Vector ([`Vector ([`Int])]))
-    (tmp6 . `Void)(tmp7 . `Void)(tmp8 . `Int)
-    (tmp9 . `Int))(root_stack_size . 8)(stack_size . 0)(conflicts . {Var tmp0 -> {Var tmp1; Var tmp15; Var tmp16; Var tmp17;
-                               Var tmp2; Var tmp20; Var tmp21; Var tmp3;
-                               Var tmp4; Var tmp5; Var tmp6; Var tmp7; Var tmp8;
-                               Var tmp9; Reg r12; Reg r13; Reg r14; Reg rbx};
-                  Var tmp1 -> {Var tmp0; Var tmp10; Var tmp5};
-                  Var tmp10 -> {Var tmp1; Var tmp15; Var tmp16; Var tmp17;
-                                Var tmp2; Var tmp20; Var tmp21; Var tmp3;
-                                Var tmp4; Var tmp6; Var tmp7; Var tmp8; Var tmp9;
-                                Reg r12; Reg r13; Reg r14; Reg rbx};
-                  Var tmp15 -> {Var tmp0; Var tmp5};
-                  Var tmp16 -> {Var tmp17; Var tmp4; Var tmp5};
-                  Var tmp17 -> {Var tmp16; Var tmp5}; Var tmp2 -> {Var tmp5};
-                  Var tmp20 -> {Var tmp21; Var tmp5; Var tmp9};
-                  Var tmp21 -> {Var tmp20; Var tmp5};
-                  Var tmp3 -> {Var tmp4; Var tmp5};
-                  Var tmp4 -> {Var tmp16; Var tmp3; Var tmp5};
-                  Var tmp5 -> {Var tmp0; Var tmp1; Var tmp15; Var tmp16;
-                               Var tmp17; Var tmp2; Var tmp20; Var tmp21;
-                               Var tmp3; Var tmp4; Var tmp6; Var tmp7; Var tmp8;
-                               Var tmp9; Reg r10; Reg r12; Reg r13; Reg r14;
-                               Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
-                               Reg rdx; Reg rsi};
-                  Var tmp6 -> {Var tmp5}; Var tmp7 -> {}; Var tmp8 -> {Var tmp9};
-                  Var tmp9 -> {Var tmp20; Var tmp8};
-                  Reg r10 -> {Var tmp5; Reg r12; Reg r13; Reg r14; Reg r8;
-                              Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
-                  Reg r12 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r13;
-                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
-                              Reg rdx; Reg rsi};
-                  Reg r13 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
-                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
-                              Reg rdx; Reg rsi};
-                  Reg r14 -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
-                              Reg r13; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
-                              Reg rdx; Reg rsi};
-                  Reg r8 -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                             Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
-                  Reg r9 -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                             Reg r8; Reg rbx; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
-                  Reg rbx -> {Var tmp0; Var tmp10; Var tmp5; Reg r10; Reg r12;
-                              Reg r13; Reg r14; Reg r8; Reg r9; Reg rcx; Reg rdi;
-                              Reg rdx; Reg rsi};
-                  Reg rcx -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                              Reg r8; Reg r9; Reg rbx; Reg rdi; Reg rdx; Reg rsi};
-                  Reg rdi -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdx; Reg rsi};
-                  Reg rdx -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rsi};
-                  Reg rsi -> {Var tmp5; Reg r10; Reg r12; Reg r13; Reg r14;
-                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx}})(moves . {Var tmp0 -> {Reg r11}; Var tmp10 -> {Reg r11};
-              Var tmp16 -> {Var tmp3}; Var tmp20 -> {Var tmp8};
-              Var tmp3 -> {Var tmp16}; Var tmp5 -> {Reg r11};
-              Var tmp8 -> {Var tmp20};
-              Reg r11 -> {Var tmp0; Var tmp10; Var tmp5}; Reg r15 -> {Reg rdi};
-              Reg rdi -> {Reg r15}})) (start . (block ([{}; {tmp8}; {tmp8; tmp9}; {tmp20; tmp9}; {tmp20}; {tmp20; tmp21}; {
-      }; {}; {}])
-    (movq (global-value free_ptr) (reg rcx))
-    (movq (int 24) (reg rbx))
-    (addq (reg rbx) (reg rcx))
-    (movq (global-value fromspace_end) (reg rbx))
-    (cmpq (reg rbx) (reg rcx))
-    (jmp-if Chapter4.CC.L block_t8)
-    (jmp block_f9)))
-    (block_t8 . (block ([{}; {}])
-    (jmp block_t6)))
-    (block_f9 . (block ([{}; {}])
-    (jmp block_f7)))
-    (block_t6 . (block ([{}; {}; {}])
-    (movq (int 0) (reg rbx))
-    (jmp block_body5)))
-    (block_f7 . (block ([{}; {}; {}; {}; {}])
-    (movq (reg r15) (reg rdi))
-    (movq (int 24) (reg rsi))
-    (callq collect)
-    (jmp block_body5)))
-    (block_body5 . (block ([{}; {tmp5}; {tmp5}; {tmp5}; {tmp5}; {tmp3; tmp5}; {tmp3; tmp4; tmp5};
-      {tmp16; tmp4; tmp5}; {tmp16; tmp5}; {tmp16; tmp17; tmp5}; {tmp5}; {
-      tmp5}; {tmp5}])
-    (movq (global-value free_ptr) (deref r15 -8))
-    (addq (int 16) (global-value free_ptr))
-    (movq (deref r15 -8) (reg r11))
-    (movq (int 131) (deref r11 0))
-    (movq (global-value free_ptr) (reg rcx))
-    (movq (int 16) (reg rbx))
-    (addq (reg rbx) (reg rcx))
-    (movq (global-value fromspace_end) (reg rbx))
-    (cmpq (reg rbx) (reg rcx))
-    (jmp-if Chapter4.CC.L block_t3)
-    (jmp block_f4)))
-    (block_t3 . (block ([{tmp5}; {tmp5}])
-    (jmp block_t1)))
-    (block_f4 . (block ([{tmp5}; {tmp5}])
-    (jmp block_f2)))
-    (block_t1 . (block ([{tmp5}; {tmp5}; {tmp5}])
-    (movq (int 0) (reg rbx))
-    (jmp block_body0)))
-    (block_f2 . (block ([{tmp5}; {tmp5}; {tmp5}; {tmp5}; {tmp5}])
-    (movq (reg r15) (reg rdi))
-    (movq (int 16) (reg rsi))
-    (callq collect)
-    (jmp block_body0)))
-    (block_body0 . (block ([{tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
-      {tmp0; tmp15; tmp5}; {tmp0; tmp15; tmp5}; {tmp0; tmp5}; {tmp0; tmp5};
-      {tmp0; tmp5}; {tmp5}; {tmp5}; {}; {tmp10}; {}; {}; {}])
-    (movq (global-value free_ptr) (reg rbx))
-    (addq (int 16) (global-value free_ptr))
-    (movq (reg rbx) (reg r11))
-    (movq (int 3) (deref r11 0))
-    (movq (int 42) (reg rcx))
-    (movq (reg rbx) (reg r11))
-    (movq (reg rcx) (deref r11 8))
-    (movq (int 0) (reg rcx))
-    (movq (deref r15 -8) (reg r11))
-    (movq (reg rbx) (deref r11 8))
-    (movq (int 0) (reg rbx))
-    (movq (deref r15 -8) (reg r11))
-    (movq (deref r11 8) (reg rbx))
-    (movq (reg rbx) (reg r11))
-    (movq (deref r11 8) (reg rax))
-    (jmp block_exit)))
-    (block_exit . (block ([{}; {}])
-    (retq))))
+    Ex2: .global _start
+    .text
+    _start:
+      pushq %rbp
+      movq %rsp, %rbp
+      subq $8, %rsp
+      movq $16384, %rdi
+      movq $16, %rsi
+      callq _initialize
+      movq _rootstack_begin(%rip), %r15
+      movq $0, (%r15)
+      addq $8, %r15
+    start:
+
+      movq _free_ptr(%rip), %rcx
+      movq $24, %rbx
+      addq %rbx, %rcx
+      movq _fromspace_end(%rip), %rbx
+      cmpq %rbx, %rcx
+      jl block_t8
+      jmp block_f9
+    block_t8:
+
+      jmp block_t6
+    block_f9:
+
+      jmp block_f7
+    block_t6:
+
+      movq $0, %rbx
+      jmp block_body5
+    block_f7:
+
+      movq %r15, %rdi
+      movq $24, %rsi
+      callq collect
+      jmp block_body5
+    block_body5:
+
+      movq _free_ptr(%rip), -8(%r15)
+      addq $16, _free_ptr(%rip)
+      movq -8(%r15), %r11
+      movq $131, (%r11)
+      movq _free_ptr(%rip), %rcx
+      movq $16, %rbx
+      addq %rbx, %rcx
+      movq _fromspace_end(%rip), %rbx
+      cmpq %rbx, %rcx
+      jl block_t3
+      jmp block_f4
+    block_t3:
+
+      jmp block_t1
+    block_f4:
+
+      jmp block_f2
+    block_t1:
+
+      movq $0, %rbx
+      jmp block_body0
+    block_f2:
+
+      movq %r15, %rdi
+      movq $16, %rsi
+      callq collect
+      jmp block_body0
+    block_body0:
+
+      movq _free_ptr(%rip), %rbx
+      addq $16, _free_ptr(%rip)
+      movq %rbx, %r11
+      movq $3, (%r11)
+      movq $42, %rcx
+      movq %rbx, %r11
+      movq %rcx, 8(%r11)
+      movq $0, %rcx
+      movq -8(%r15), %r11
+      movq %rbx, 8(%r11)
+      movq $0, %rbx
+      movq -8(%r15), %r11
+      movq 8(%r11), %rbx
+      movq %rbx, %r11
+      movq 8(%r11), %rax
+      jmp block_exit
+    block_exit:
+
+      movq %rbp, %rsp
+      popq %rbp
+      subq $8, %r15
+      retq
     |}]
