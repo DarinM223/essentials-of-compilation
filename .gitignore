@@ -4,4 +4,6 @@ example/example
 example/example.o
 example/example2
 example/example2.o
+example/example3
+example/example3.o
 c/runtime.o

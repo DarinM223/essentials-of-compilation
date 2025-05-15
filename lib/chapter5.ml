@@ -743,9 +743,17 @@ struct
   include X86_2_R_T (M.X_reader) (X86)
   include M.IDelta
 end
+module PatchInstructionsPass (X86 : X86_2) = struct
+  include Chapter4.PatchInstructionsPass (X86_1_of_X86_2 (X86))
+  module IDelta = struct
+    include IDelta
+    let global_value n =
+      (ArgInfo.MemoryReference (Hashtbl.hash (X86.rdi, n)), X86.global_value n)
+  end
+end
 module PatchInstructions (F : X86_2) : X86_2 with type 'a obs = 'a F.obs =
 struct
-  module M = Chapter4.PatchInstructionsPass (X86_1_of_X86_2 (F))
+  module M = PatchInstructionsPass (F)
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
 end
@@ -832,7 +840,6 @@ module X86_2_Printer = struct
 
   let global_value label = "_" ^ label ^ "(%rip)"
 
-  (* TODO: how should these be calculated? *)
   let root_stack_total_size = 16384
   let root_stack_heap_size = 16
 
@@ -1080,7 +1087,8 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_body5
     block_body5:
 
-      movq _free_ptr(%rip), -8(%r15)
+      movq _free_ptr(%rip), %rax
+      movq %rax, -8(%r15)
       addq $16, _free_ptr(%rip)
       movq -8(%r15), %r11
       movq $131, (%r11)
