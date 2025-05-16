@@ -838,7 +838,7 @@ end
 module X86_2_Printer = struct
   include Chapter4.X86_1_Printer
 
-  let global_value label = "_" ^ label ^ "(%rip)"
+  let global_value label = label ^ "(%rip)"
 
   let root_stack_total_size = 16384
   let root_stack_heap_size = 16
@@ -851,7 +851,7 @@ module X86_2_Printer = struct
           @ [
               movq (int root_stack_total_size) rdi;
               movq (int root_stack_heap_size) rsi;
-              callq "_initialize";
+              callq "initialize";
               movq (global_value "rootstack_begin") r15;
               movq (int 0) (deref r15 0);
               addq (int stack_size) r15;
@@ -859,7 +859,7 @@ module X86_2_Printer = struct
           footer @ [ subq (int stack_size) r15 ] )
       | None -> (header, footer)
     in
-    Option.map add_root_stack (program_info stack_size)
+    Option.map add_root_stack (function_prologue_epilogue stack_size)
 
   let program_helper stack_size root_stack_size blocks =
     blocks
@@ -869,7 +869,7 @@ module X86_2_Printer = struct
   let program ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_
       blocks =
     String.concat "\n"
-    @@ [ ".global _start"; ".text"; "_start:" ]
+    @@ [ ".global main"; ".text"; "main:" ]
     @ program_helper stack_size root_stack_size blocks
 end
 
@@ -1048,24 +1048,28 @@ let%expect_test "Ex2 allocate registers" =
   Format.printf "Ex2: %s" M.res;
   [%expect
     {|
-    Ex2: .global _start
+    Ex2: .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $8, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
       movq $16384, %rdi
       movq $16, %rsi
-      callq _initialize
-      movq _rootstack_begin(%rip), %r15
+      callq initialize
+      movq rootstack_begin(%rip), %r15
       movq $0, (%r15)
       addq $8, %r15
     start:
 
-      movq _free_ptr(%rip), %rcx
+      movq free_ptr(%rip), %rcx
       movq $24, %rbx
       addq %rbx, %rcx
-      movq _fromspace_end(%rip), %rbx
+      movq fromspace_end(%rip), %rbx
       cmpq %rbx, %rcx
       jl block_t8
       jmp block_f9
@@ -1087,15 +1091,15 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_body5
     block_body5:
 
-      movq _free_ptr(%rip), %rax
+      movq free_ptr(%rip), %rax
       movq %rax, -8(%r15)
-      addq $16, _free_ptr(%rip)
+      addq $16, free_ptr(%rip)
       movq -8(%r15), %r11
       movq $131, (%r11)
-      movq _free_ptr(%rip), %rcx
+      movq free_ptr(%rip), %rcx
       movq $16, %rbx
       addq %rbx, %rcx
-      movq _fromspace_end(%rip), %rbx
+      movq fromspace_end(%rip), %rbx
       cmpq %rbx, %rcx
       jl block_t3
       jmp block_f4
@@ -1117,8 +1121,8 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_body0
     block_body0:
 
-      movq _free_ptr(%rip), %rbx
-      addq $16, _free_ptr(%rip)
+      movq free_ptr(%rip), %rbx
+      addq $16, free_ptr(%rip)
       movq %rbx, %r11
       movq $3, (%r11)
       movq $42, %rcx
@@ -1135,6 +1139,10 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_exit
     block_exit:
 
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       subq $8, %r15

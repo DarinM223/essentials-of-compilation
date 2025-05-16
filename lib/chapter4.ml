@@ -998,12 +998,16 @@ let%expect_test "Allocate Registers" =
   print_endline M.res;
   [%expect
     {|
-    .global _start
+    .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $8, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
     start:
 
       movq $5, %rdx
@@ -1080,6 +1084,10 @@ let%expect_test "Allocate Registers" =
       jmp block_exit
     block_exit:
 
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       retq

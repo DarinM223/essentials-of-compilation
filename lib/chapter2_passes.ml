@@ -356,14 +356,22 @@ module X86_0_Printer = struct
   let pushq a = "pushq " ^ a
   let popq a = "popq " ^ a
 
-  let program_info stack_size =
+  let function_prologue_epilogue stack_size =
     Option.map
       (fun stack_size ->
         let stack_size =
-          if (stack_size + 8) mod 16 = 0 then stack_size else stack_size + 8
+          if stack_size mod 16 = 0 then stack_size else stack_size + 8
         in
-        ( [ pushq rbp; movq rsp rbp; subq (int stack_size) rsp ],
-          [ movq rbp rsp; popq rbp ] ))
+        ( [
+            pushq rbp;
+            movq rsp rbp;
+            pushq r12;
+            pushq rbx;
+            pushq r13;
+            pushq r14;
+            subq (int stack_size) rsp;
+          ],
+          [ popq r14; popq r13; popq rbx; popq r12; movq rbp rsp; popq rbp ] ))
       stack_size
 
   let indent s = "  " ^ s
@@ -380,11 +388,11 @@ module X86_0_Printer = struct
   let program_helper stack_size blocks =
     blocks
     |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block)
-    |> apply_header_footer (program_info stack_size)
+    |> apply_header_footer (function_prologue_epilogue stack_size)
 
   let program ?stack_size ?conflicts:_ ?moves:_ blocks =
     String.concat "\n"
-    @@ [ ".global _start"; ".text"; "_start:" ]
+    @@ [ ".global main"; ".text"; "main:" ]
     @ program_helper stack_size blocks
 
   let observe s = s
@@ -533,12 +541,16 @@ let%expect_test "Example 6 final printed X86" =
   Format.printf "%s\n" M.res;
   [%expect
     {|
-    .global _start
+    .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $24, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $32, %rsp
     start:
 
       movq $20, -8(%rbp)
@@ -548,6 +560,10 @@ let%expect_test "Example 6 final printed X86" =
       movq -16(%rbp), %rax
       addq %rax, -24(%rbp)
       movq -24(%rbp), %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       retq

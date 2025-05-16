@@ -552,12 +552,16 @@ let%expect_test "Example 1 after allocate registers" =
   Format.printf "%s\n" M.res;
   [%expect
     {|
-    .global _start
+    .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $8, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
     start:
 
       movq $1, %rbx
@@ -572,6 +576,10 @@ let%expect_test "Example 1 after allocate registers" =
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       retq
@@ -586,12 +594,16 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
   Format.printf "%s\n" M.res;
   [%expect
     {|
-    .global _start
+    .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $8, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
     start:
 
       movq $1, %rbx
@@ -606,6 +618,10 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       retq
@@ -623,12 +639,16 @@ let%expect_test
   Format.printf "%s\n" M.res;
   [%expect
     {|
-    .global _start
+    .global main
     .text
-    _start:
+    main:
       pushq %rbp
       movq %rsp, %rbp
-      subq $8, %rsp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
     start:
 
       movq $1, %rbx
@@ -640,6 +660,10 @@ let%expect_test
       negq %rcx
       movq %rbx, %rax
       addq %rcx, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
       movq %rbp, %rsp
       popq %rbp
       retq
