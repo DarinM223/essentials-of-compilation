@@ -74,7 +74,10 @@ module R1_R_T (R : Chapter1.Reader) (F : R1) :
   let string_of_var = F.string_of_var
   let fresh = F.fresh
   let var_of_string = F.var_of_string
-  let lett v e b r = F.lett v (e r) (b r)
+  let lett v e b r =
+    let e = e r in
+    let b = b r in
+    F.lett v e b
 end
 
 module R1_Partial (F : R1) : R1 with type 'a obs = 'a F.program = struct

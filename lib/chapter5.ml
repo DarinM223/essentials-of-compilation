@@ -255,6 +255,30 @@ module R3_Collect_Annotate_Types (F : R3_Collect) :
   let global_value name _ = (`Int, F.has_type (F.global_value name) `Int)
 end
 
+module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) :
+  R3_Shrink
+    with type 'a exp = R.t -> 'a F.exp
+     and type 'a program = unit -> 'a F.program
+     and type 'a var = 'a F.var
+     and type 'a obs = 'a F.obs = struct
+  include Chapter4.R2_Shrink_R_T (R) (F)
+  module ExpHList = HList (struct
+    type 'a t = 'a exp
+  end)
+  let has_type e t r = F.has_type (e r) t
+  let void _ = F.void
+  let vector es r =
+    let rec go : type t. t ExpHList.hlist -> t F.ExpHList.hlist = function
+      | ExpHList.(x :: xs) ->
+        let x = x r in
+        F.ExpHList.(x :: go xs)
+      | ExpHList.[] -> F.ExpHList.[]
+    in
+    F.vector (go es)
+  let vector_ref v ptr r = F.vector_ref (v r) ptr
+  let vector_set v ptr e r = F.vector_set (v r) ptr (e r)
+end
+
 module R3_Shrink_T
     (X_exp : Chapter1.TRANS)
     (X_program : Chapter1.TRANS)

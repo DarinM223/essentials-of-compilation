@@ -71,7 +71,11 @@ module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
   let not a r = F.not (a r)
   let ( = ) a b r = F.(a r = b r)
   let ( < ) a b r = F.(a r < b r)
-  let if_ a b c r = F.if_ (a r) (b r) (c r)
+  let if_ a b c r =
+    let a = a r in
+    let b = b r in
+    let c = c r in
+    F.if_ a b c
 end
 
 module R2_Shrink_Pretty () = struct

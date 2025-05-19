@@ -27,9 +27,14 @@ module type R4 = sig
   include R4_Shrink with type 'a exp := 'a exp
 end
 
-module type R4_Collect = sig
+module type F1 = sig
+  include R4_Shrink
+  val fun_ref : string -> 'a exp
+end
+
+module type F1_Collect = sig
   include Chapter5.R3_Collect
-  include R4 with type 'a exp := 'a exp
+  include F1 with type 'a exp := 'a exp
 end
 
 module type R4_Let = sig
@@ -57,9 +62,44 @@ module R3_of_R4 (F : R4) = struct
   let program e = F.program (body e)
 end
 
-module R3_of_R4_Collect (F : R4_Collect) = struct
+module R3_of_F1_Collect (F : F1_Collect) = struct
   include F
   let program e = F.program (body e)
+end
+
+module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) :
+  R4_Shrink
+    with type 'a exp = R.t -> 'a F.exp
+     and type 'a def = R.t -> 'a F.def
+     and type 'a program = unit -> 'a F.program
+     and type 'a var = 'a F.var
+     and type 'a obs = 'a F.obs = struct
+  include Chapter5.R3_Shrink_R_T (R) (R3_of_R4_Shrink (F))
+  module VarHList = F.VarHList
+  type 'a def = R.t -> 'a F.def
+
+  let ( $ ) e es r =
+    let rec go : type t. t ExpHList.hlist -> t F.ExpHList.hlist = function
+      | ExpHList.(x :: xs) ->
+        let x = x r in
+        F.ExpHList.(x :: go xs)
+      | ExpHList.[] -> F.ExpHList.[]
+    in
+    let e = e r in
+    let es = go es in
+    F.( $ ) e es
+
+  let define v vs e rest r =
+    let e = e r in
+    let rest = rest r in
+    F.define v vs e rest
+
+  let body e r = F.body (e r)
+  let endd () _ = F.endd ()
+
+  let program def () =
+    let init = R.init () in
+    F.program (def init)
 end
 
 module R4_Shrink_T
@@ -104,18 +144,43 @@ struct
   include Chapter4.R2_T (X_exp) (X_program) (R3_of_R4 (F))
 end
 
-module R4_Collect_T
+module F1_R_T (R : Chapter1.Reader) (F : F1) :
+  F1
+    with type 'a exp = R.t -> 'a F.exp
+     and type 'a def = R.t -> 'a F.def
+     and type 'a program = unit -> 'a F.program
+     and type 'a var = 'a F.var
+     and type 'a obs = 'a F.obs = struct
+  include R4_Shrink_R_T (R) (F)
+  let fun_ref label _ = F.fun_ref label
+end
+
+module F1_T
     (X_exp : Chapter1.TRANS)
     (X_def : Chapter1.TRANS)
     (X_program : Chapter1.TRANS)
     (F :
-      R4_Collect
+      F1
         with type 'a exp = 'a X_exp.from
          and type 'a def = 'a X_def.from
          and type 'a program = 'a X_program.from) =
 struct
   include R4_Shrink_T (X_exp) (X_def) (X_program) (F)
-  include Chapter5.R3_Collect_T (X_exp) (X_program) (R3_of_R4_Collect (F))
+  let fun_ref label = X_exp.fwd @@ F.fun_ref label
+end
+
+module F1_Collect_T
+    (X_exp : Chapter1.TRANS)
+    (X_def : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      F1_Collect
+        with type 'a exp = 'a X_exp.from
+         and type 'a def = 'a X_def.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include F1_T (X_exp) (X_def) (X_program) (F)
+  include Chapter5.R3_Collect_T (X_exp) (X_program) (R3_of_F1_Collect (F))
 end
 
 module TransformLetPass (F : R4) = struct
@@ -176,6 +241,15 @@ module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
   module M = ShrinkPass (F)
   include R4_Shrink_T (M.X_exp) (M.X_def) (M.X_program) (F)
   include M.IDelta
+end
+
+module StringHashtbl = Hashtbl.Make (String)
+module RevealFunctions (F : F1) = struct
+  let define v params body rest is_function =
+    StringHashtbl.add is_function (F.string_of_var v) ();
+    let rest = rest is_function in
+    let body = body is_function in
+    F.define v params body rest
 end
 
 module Ex1 (F : R4_Let) = struct
