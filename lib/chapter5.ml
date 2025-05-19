@@ -142,6 +142,7 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
   let ( + ) e1 e2 m = bin_op F.( + ) e1 e2 m
   let var v m = (StringMap.find (F.string_of_var v) m, F.var v)
   let fresh = F.fresh
+  let var_of_string = F.var_of_string
   let string_of_var = F.string_of_var
   let lett v e b m =
     let typ, e = e m in

@@ -4,6 +4,7 @@ module type R1 = sig
   type 'a var
   val var : 'a var -> 'a exp
   val fresh : unit -> 'a var
+  val var_of_string : string -> 'a var
   val string_of_var : 'a var -> string
   val lett : 'a var -> 'a exp -> 'b exp -> 'b exp
 end
@@ -31,6 +32,7 @@ module R1_T
   let string_of_var = F.string_of_var
   let var v = fwd @@ F.var v
   let fresh = F.fresh
+  let var_of_string = F.var_of_string
   let lett v e b = fwd @@ F.lett v (bwd e) (bwd b)
 end
 
@@ -71,6 +73,7 @@ module R1_R_T (R : Chapter1.Reader) (F : R1) :
   let var v _ = F.var v
   let string_of_var = F.string_of_var
   let fresh = F.fresh
+  let var_of_string = F.var_of_string
   let lett v e b r = F.lett v (e r) (b r)
 end
 
@@ -91,6 +94,7 @@ module R1_Pretty () = struct
     fun () ->
       incr c;
       "tmp" ^ string_of_int !c
+  let var_of_string v = v
 
   let lett v e b = "(let ([" ^ v ^ " " ^ e ^ "]) " ^ b ^ ")"
 end

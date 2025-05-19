@@ -118,16 +118,6 @@ struct
   include Chapter5.R3_Collect_T (X_exp) (X_program) (R3_of_R4_Collect (F))
 end
 
-module BuildFn
-    (M : sig
-      type r
-    end)
-    (F : R4) : sig
-  val result : M.r F.VarHList.hlist
-end = struct
-  let result = failwith ""
-end
-
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
   module X_def = Chapter1.MkId (struct
@@ -160,7 +150,6 @@ module TransformLetPass (F : R4) = struct
     let program def = X_program.fwd (F.program (X_def.bwd def))
   end
 end
-
 module TransformLet (F : R4) :
   R4_Let
     with type 'a exp = 'a F.exp
@@ -169,6 +158,23 @@ module TransformLet (F : R4) :
      and type 'a obs = 'a F.obs = struct
   module M = TransformLetPass (F)
   include R4_T (M.X_exp) (M.X_def) (M.X_program) (F)
+  include M.IDelta
+end
+
+module ShrinkPass (F : R4_Shrink) = struct
+  include Chapter4.ShrinkPass (R3_of_R4_Shrink (F))
+  module X_def = Chapter1.MkId (struct
+    type 'a t = 'a F.def
+  end)
+
+  module IDelta = struct
+    include IDelta
+    let body e = F.define (F.var_of_string "main") [] e (F.endd ())
+  end
+end
+module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
+  module M = ShrinkPass (F)
+  include R4_Shrink_T (M.X_exp) (M.X_def) (M.X_program) (F)
   include M.IDelta
 end
 

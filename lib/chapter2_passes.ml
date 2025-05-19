@@ -70,6 +70,7 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
 
   let string_of_var = F.string_of_var
   let fresh = F.fresh
+  let var_of_string = F.var_of_string
 
   let convert_exp e m = function
     | Tail -> C0.return (m.f e)
