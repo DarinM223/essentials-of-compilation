@@ -73,7 +73,8 @@ module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) :
      and type 'a def = R.t -> 'a F.def
      and type 'a program = unit -> 'a F.program
      and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs = struct
+     and type 'a obs = 'a F.obs
+     and module VarHList = F.VarHList = struct
   include Chapter5.R3_Shrink_R_T (R) (R3_of_R4_Shrink (F))
   module VarHList = F.VarHList
   type 'a def = R.t -> 'a F.def
@@ -150,7 +151,8 @@ module F1_R_T (R : Chapter1.Reader) (F : F1) :
      and type 'a def = R.t -> 'a F.def
      and type 'a program = unit -> 'a F.program
      and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs = struct
+     and type 'a obs = 'a F.obs
+     and module VarHList = F.VarHList = struct
   include R4_Shrink_R_T (R) (F)
   let fun_ref label _ = F.fun_ref label
 end
@@ -244,19 +246,68 @@ module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
 end
 
 module StringHashtbl = Hashtbl.Make (String)
-module RevealFunctions (F : F1) = struct
-  let define v params body rest is_function =
-    StringHashtbl.add is_function (F.string_of_var v) ();
-    let rest = rest is_function in
-    let body = body is_function in
-    F.define v params body rest
+module RevealFunctionsPass (F : F1) = struct
+  module R = struct
+    type t = unit StringHashtbl.t
+    let init () = StringHashtbl.create 100
+  end
+
+  module IDelta = struct
+    let var v is_function =
+      if StringHashtbl.mem is_function (F.string_of_var v) then
+        F.fun_ref (F.string_of_var v)
+      else
+        F.var v
+    let define v params body rest is_function =
+      StringHashtbl.add is_function (F.string_of_var v) ();
+      let rest = rest is_function in
+      let body = body is_function in
+      F.define v params body rest
+  end
+end
+module RevealFunctions (F : F1) : R4_Shrink with type 'a obs = 'a F.obs = struct
+  module M = RevealFunctionsPass (F)
+  include R4_Shrink_R_T (M.R) (F)
+  include M.IDelta
+end
+
+module R4_Shrink_Pretty () = struct
+  include Chapter5.R3_Pretty ()
+  type 'a def = string
+  module VarHList = Chapter5.HList (struct
+    type 'a t = 'a var
+  end)
+
+  let ( $ ) e es =
+    let rec go : type r. r ExpHList.hlist -> string = function
+      | ExpHList.(x :: xs) -> " " ^ x ^ go xs
+      | ExpHList.[] -> ""
+    in
+    "(" ^ e ^ go es ^ ")"
+
+  let define v vs e rest =
+    let rec go : type r. r VarHList.hlist -> string = function
+      | VarHList.(x :: xs) -> " " ^ x ^ go xs
+      | VarHList.[] -> ""
+    in
+    "(define (" ^ v ^ go vs ^ ")\n  " ^ e ^ ")\n" ^ rest
+
+  let body _ = failwith "Body should have been eliminated by the Shrink pass"
+  let endd () = ""
+
+  let program def = "(program\n" ^ def ^ ")"
+end
+
+module F1_Pretty () = struct
+  include R4_Shrink_Pretty ()
+  let fun_ref label = "(fun-ref " ^ label ^ ")"
 end
 
 module Ex1 (F : R4_Let) = struct
   open F
 
   let res =
-    program
+    observe @@ program
     @@
     let@ map_vec =
       [ (); () ] @> fun [ f; v ] ->
@@ -272,3 +323,45 @@ module Ex1 (F : R4_Let) = struct
          (var map_vec $ [ var add1; vector [ int 0; int 41 ] ])
          (Next Here)
 end
+
+(* TODO: Test mutually recursive functions *)
+(* module Ex2 (F : R4_Let) = struct
+  open F
+
+  let res =
+    observe @@ program
+    @@
+    let@@ [ is_even; is_odd ] =
+      [ (); () ] @> fun [ is_even; is_odd ] ->
+      [
+        begin
+          [ () ] @> fun [ v ] ->
+          if_ (var v = int 0) t (is_odd $ [ var v - int 1 ])
+        end;
+        begin
+          [ () ] @> fun [ v ] ->
+          if_ (var v = int 0) f (is_even $ [ var v - int 1 ])
+        end;
+      ]
+    in
+    failwith ""
+end *)
+
+let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
+  let module M = Ex1 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
+  Format.printf "Ex1: %s" M.res;
+  [%expect
+    {|
+    Ex1: (program
+    (define (tmp0 tmp2 tmp1)
+      (vector ((var tmp2) (vector-ref (var tmp1) 0)) ((var tmp2) (vector-ref (var tmp1) 1))))
+    (define (tmp3 tmp4)
+      (+ (var tmp4) 1))
+    (define (main)
+      (vector-ref ((fun-ref tmp0) (fun-ref tmp3) (vector 0 41)) 1))
+    )
+    |}]
+
+(* let%expect_test "Example 2 RemoveLet, Shrink, and RevealFunctions" =
+  let module M = Ex2 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
+  Format.printf "Ex2: %s" M.res *)
