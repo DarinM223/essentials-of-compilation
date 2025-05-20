@@ -37,19 +37,49 @@ module type F1_Collect = sig
   include F1 with type 'a exp := 'a exp
 end
 
+module type FN_HLIST = sig
+  type ('a, 'b) el
+  type _ hlist =
+    | [] : unit hlist
+    | ( :: ) : ('a, 'b) el * 'c hlist -> (('a -> 'b) * 'c) hlist
+end
+module FnHListFn (E : sig
+  type ('a, 'b) t
+end) : FN_HLIST with type ('a, 'b) el = ('a, 'b) E.t = struct
+  type ('a, 'b) el = ('a, 'b) E.t
+  type _ hlist =
+    | [] : unit hlist
+    | ( :: ) : ('a, 'b) el * 'c hlist -> (('a -> 'b) * 'c) hlist
+end
+
 module type R4_Let = sig
   include Chapter2_definitions.R1_Let
   include R4 with type 'a exp := 'a exp and type 'a var := 'a var
   module UnitHList : Chapter5.HLIST with type 'a el = unit
 
-  type ('r, 'a) wrapped = {
-    realized : 'r UnitHList.hlist;
-    fn : 'r VarHList.hlist -> 'a exp;
-  }
+  module Wrapped : sig
+    type ('r, 'a) t = {
+      realized : 'r UnitHList.hlist;
+      fn : 'r VarHList.hlist -> 'a exp;
+    }
+  end
+  module FnHList : FN_HLIST with type ('a, 'b) el = ('a, 'b) Wrapped.t
+  module Wrapped2 : sig
+    type ('r, 'a) t = {
+      realized : 'r UnitHList.hlist;
+      fn : 'r VarHList.hlist -> 'r FnHList.hlist;
+    }
+  end
 
   val ( @> ) :
-    'r UnitHList.hlist -> ('r VarHList.hlist -> 'a exp) -> ('r, 'a) wrapped
-  val ( let@ ) : ('tup, 'a) wrapped -> (('tup -> 'a) var -> 'b def) -> 'b def
+    'r UnitHList.hlist -> ('r VarHList.hlist -> 'a exp) -> ('r, 'a) Wrapped.t
+  val ( let@ ) : ('tup, 'a) Wrapped.t -> (('tup -> 'a) var -> 'b def) -> 'b def
+  val ( @@> ) :
+    'r UnitHList.hlist ->
+    ('r VarHList.hlist -> 'r FnHList.hlist) ->
+    ('r, 'a) Wrapped2.t
+  val ( let@@ ) :
+    ('tup, 'a) Wrapped2.t -> ('tup VarHList.hlist -> 'b def) -> 'b def
 end
 
 module R3_of_R4_Shrink (F : R4_Shrink) = struct
@@ -192,27 +222,54 @@ module TransformLetPass (F : R4) = struct
   end)
   module IDelta = struct
     include IDelta
-    module UnitHList = Chapter5.HList (struct
+    module UnitHList = Chapter5.HListFn (struct
       type 'a t = unit
     end)
-    type ('r, 'a) wrapped = {
-      realized : 'r UnitHList.hlist;
-      fn : 'r F.VarHList.hlist -> 'a F.exp;
-    }
-    let ( @> ) realized fn = { realized; fn }
+    module Wrapped = struct
+      type ('r, 'a) t = {
+        realized : 'r UnitHList.hlist;
+        fn : 'r F.VarHList.hlist -> 'a F.exp;
+      }
+    end
+    module FnHList = FnHListFn (struct
+      type ('a, 'b) t = ('a, 'b) Wrapped.t
+    end)
+    module Wrapped2 = struct
+      type ('r, 'a) t = {
+        realized : 'r UnitHList.hlist;
+        fn : 'r F.VarHList.hlist -> 'r FnHList.hlist;
+      }
+    end
+    let ( @> ) realized fn = Wrapped.{ realized; fn }
+    let ( @@> ) realized fn = Wrapped2.{ realized; fn }
 
-    let ( let@ ) : type tup.
-        (tup, 'a) wrapped -> ((tup -> 'a) F.var -> 'b F.def) -> 'b F.def =
-     fun f g ->
-      let var = F.fresh () in
+    let let_helper var f g =
       let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
         | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
         | UnitHList.[] -> F.VarHList.[]
       in
-      let params = go f.realized in
+      let params = go f.Wrapped.realized in
       let body = f.fn params in
       let rest = g var in
       F.define var params body rest
+
+    let ( let@ ) f g = let_helper (F.fresh ()) f g
+
+    let ( let@@ ) f g =
+      let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
+        | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
+        | UnitHList.[] -> F.VarHList.[]
+      in
+      let vars = go f.Wrapped2.realized in
+      let fns = f.fn vars in
+      let rest = g vars in
+      let rec go : type r. r FnHList.hlist * r F.VarHList.hlist -> 'a F.def =
+        function
+        | FnHList.(wrapped :: xs), F.VarHList.(v :: vs) ->
+          let_helper v wrapped (fun _ -> go (xs, vs))
+        | FnHList.[], F.VarHList.[] -> rest
+      in
+      go (fns, vars)
 
     let program def = X_program.fwd (F.program (X_def.bwd def))
   end
@@ -274,7 +331,7 @@ end
 module R4_Shrink_Pretty () = struct
   include Chapter5.R3_Pretty ()
   type 'a def = string
-  module VarHList = Chapter5.HList (struct
+  module VarHList = Chapter5.HListFn (struct
     type 'a t = 'a var
   end)
 
@@ -324,28 +381,28 @@ module Ex1 (F : R4_Let) = struct
          (Next Here)
 end
 
-(* TODO: Test mutually recursive functions *)
-(* module Ex2 (F : R4_Let) = struct
+(* Test mutually recursive functions *)
+module Ex2 (F : R4_Let) = struct
   open F
 
   let res =
     observe @@ program
     @@
-    let@@ [ is_even; is_odd ] =
-      [ (); () ] @> fun [ is_even; is_odd ] ->
+    let@@ [ is_even; _ ] =
+      [ (); () ] @@> fun [ is_even; is_odd ] ->
       [
         begin
           [ () ] @> fun [ v ] ->
-          if_ (var v = int 0) t (is_odd $ [ var v - int 1 ])
+          if_ (var v = int 0) t (var is_odd $ [ var v - int 1 ])
         end;
         begin
           [ () ] @> fun [ v ] ->
-          if_ (var v = int 0) f (is_even $ [ var v - int 1 ])
+          if_ (var v = int 0) f (var is_even $ [ var v - int 1 ])
         end;
       ]
     in
-    failwith ""
-end *)
+    body (var is_even $ [ int 24 ])
+end
 
 let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
   let module M = Ex1 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
@@ -362,6 +419,17 @@ let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
     )
     |}]
 
-(* let%expect_test "Example 2 RemoveLet, Shrink, and RevealFunctions" =
+let%expect_test "Example 2 RemoveLet, Shrink, and RevealFunctions" =
   let module M = Ex2 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
-  Format.printf "Ex2: %s" M.res *)
+  Format.printf "Ex2: %s" M.res;
+  [%expect
+    {|
+    Ex2: (program
+    (define (tmp1 tmp2)
+      (if (= (var tmp2) 0) t ((fun-ref tmp0) (+ (var tmp2) (- 1)))))
+    (define (tmp0 tmp3)
+      (if (= (var tmp3) 0) f ((fun-ref tmp1) (+ (var tmp3) (- 1)))))
+    (define (main)
+      ((fun-ref tmp1) 24))
+    )
+    |}]

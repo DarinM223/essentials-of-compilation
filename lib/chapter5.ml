@@ -19,7 +19,7 @@ module type HLIST = sig
   val replace : 'r hlist -> ('a, 'r) ptr -> 'a el -> 'r hlist
 end
 
-module HList (E : sig
+module HListFn (E : sig
   type 'a t
 end) : HLIST with type 'a el = 'a E.t = struct
   type 'a el = 'a E.t
@@ -41,12 +41,6 @@ end) : HLIST with type 'a el = 'a E.t = struct
     | x :: xs, Next n -> x :: replace xs n e
     | [], _ -> .
 end
-
-module OptionHList = HList (struct
-  type 'a t = 'a option
-end)
-let example : (int * (string * (float * unit))) OptionHList.hlist =
-  OptionHList.[ Some 1; Some "hello"; Some 3.0 ]
 
 module R3_Types = struct
   (* Runtime representation of types for garbage collection.
@@ -176,7 +170,7 @@ module R3_Annotate_Types (F : R3_Shrink) :
      and type 'a obs = 'a F.obs = struct
   include R2_Shrink_AnnotateTypes (F)
   open R3_Types
-  module ExpHList = HList (struct
+  module ExpHList = HListFn (struct
     type 'a t = 'a exp
   end)
 
@@ -262,7 +256,7 @@ module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) :
      and type 'a var = 'a F.var
      and type 'a obs = 'a F.obs = struct
   include Chapter4.R2_Shrink_R_T (R) (F)
-  module ExpHList = HList (struct
+  module ExpHList = HListFn (struct
     type 'a t = 'a exp
   end)
   let has_type e t r = F.has_type (e r) t
@@ -289,7 +283,7 @@ module R3_Shrink_T
 struct
   include Chapter4.R2_Shrink_T (X_exp) (X_program) (F)
   open X_exp
-  module ExpHList = HList (struct
+  module ExpHList = HListFn (struct
     type 'a t = 'a exp
   end)
   let has_type e t = fwd @@ F.has_type (bwd e) t
@@ -506,7 +500,7 @@ end
 
 module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   include Chapter4.ExplicateControl (F) (C1_of_C2 (C2)) ()
-  module ExpHList = HList (struct
+  module ExpHList = HListFn (struct
     type 'a t = 'a exp
   end)
 
@@ -785,7 +779,7 @@ end
 
 module R3_Pretty () = struct
   include Chapter4.R2_Shrink_Pretty ()
-  module ExpHList = HList (struct
+  module ExpHList = HListFn (struct
     type 'a t = 'a exp
   end)
 
