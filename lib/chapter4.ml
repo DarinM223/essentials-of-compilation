@@ -78,6 +78,17 @@ module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
     F.if_ a b c
 end
 
+module R2_R_T (R : Chapter1.Reader) (F : R2) = struct
+  include R2_Shrink_R_T (R) (F)
+  let ( - ) a b r = F.(a r - b r)
+  let andd a b r = F.andd (a r) (b r)
+  let orr a b r = F.orr (a r) (b r)
+  let ( <> ) a b r = F.(a r <> b r)
+  let ( <= ) a b r = F.(a r <= b r)
+  let ( > ) a b r = F.(a r > b r)
+  let ( >= ) a b r = F.(a r >= b r)
+end
+
 module R2_Shrink_Pretty () = struct
   include Chapter2_definitions.R1_Pretty ()
   let t = "t"
@@ -268,13 +279,9 @@ module X86_1_Printer = struct
   let label l = l ^ ":"
 end
 
-module TransformLet (F : R2) :
-  R2_Let
-    with type 'a exp = 'a F.exp
-     and type 'a program = 'a F.program
-     and type 'a obs = 'a F.obs = struct
+module TransformLet (F : R2) : R2_Let with type 'a obs = 'a F.obs = struct
   module M = Chapter2_definitions.TransformLetPass (F)
-  include R2_T (M.X_exp) (M.X_program) (F)
+  include R2_R_T (M.R) (F)
   include M.IDelta
 end
 

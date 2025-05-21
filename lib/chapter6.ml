@@ -8,14 +8,78 @@ module R4_Types = struct
   [@@deriving show]
 end
 
+module type LIMIT = sig
+  module HList : Chapter5.HLIST
+  open HList
+
+  type _ limit =
+    | LX :
+        'a el * 'b el * 'c el * 'd el * 'e el * ('f * 'g) el
+        -> ('a * ('b * ('c * ('d * ('e * ('f * 'g)))))) limit
+    | L6 :
+        'a el * 'b el * 'c el * 'd el * 'e el * 'f el
+        -> ('a * ('b * ('c * ('d * ('e * ('f * unit)))))) limit
+    | L5 :
+        'a el * 'b el * 'c el * 'd el * 'e el
+        -> ('a * ('b * ('c * ('d * ('e * unit))))) limit
+    | L4 :
+        'a el * 'b el * 'c el * 'd el
+        -> ('a * ('b * ('c * ('d * unit)))) limit
+    | L3 : 'a el * 'b el * 'c el -> ('a * ('b * ('c * unit))) limit
+    | L2 : 'a el * 'b el -> ('a * ('b * unit)) limit
+    | L1 : 'a el -> ('a * unit) limit
+    | L0 : unit limit
+
+  type convert = { f : 'a. 'a hlist -> 'a el }
+  val transform : convert -> 't hlist -> 't limit
+end
+
+module LimitFn (HList : Chapter5.HLIST) = struct
+  module HList = HList
+  open HList
+
+  type _ limit =
+    | LX :
+        'a el * 'b el * 'c el * 'd el * 'e el * ('f * 'g) el
+        -> ('a * ('b * ('c * ('d * ('e * ('f * 'g)))))) limit
+    | L6 :
+        'a el * 'b el * 'c el * 'd el * 'e el * 'f el
+        -> ('a * ('b * ('c * ('d * ('e * ('f * unit)))))) limit
+    | L5 :
+        'a el * 'b el * 'c el * 'd el * 'e el
+        -> ('a * ('b * ('c * ('d * ('e * unit))))) limit
+    | L4 :
+        'a el * 'b el * 'c el * 'd el
+        -> ('a * ('b * ('c * ('d * unit)))) limit
+    | L3 : 'a el * 'b el * 'c el -> ('a * ('b * ('c * unit))) limit
+    | L2 : 'a el * 'b el -> ('a * ('b * unit)) limit
+    | L1 : 'a el -> ('a * unit) limit
+    | L0 : unit limit
+
+  type convert = { f : 'a. 'a hlist -> 'a el }
+
+  let transform (type t) conv (xs : t hlist) : t limit =
+    match xs with
+    | [ a; b; c; d; e; f ] -> L6 (a, b, c, d, e, f)
+    | a :: b :: c :: d :: e :: f :: g -> LX (a, b, c, d, e, conv.f (f :: g))
+    | [ a; b; c; d; e ] -> L5 (a, b, c, d, e)
+    | [ a; b; c; d ] -> L4 (a, b, c, d)
+    | [ a; b; c ] -> L3 (a, b, c)
+    | [ a; b ] -> L2 (a, b)
+    | [ a ] -> L1 a
+    | [] -> L0
+end
+
 module type R4_Shrink = sig
   include Chapter5.R3_Shrink
-  val ( $ ) : ('tup -> 'a) exp -> 'tup ExpHList.hlist -> 'a exp
+  module ExpLimitList : LIMIT with module HList = ExpHList
   module VarHList : Chapter5.HLIST with type 'a el = 'a var
+  module VarLimitList : LIMIT with module HList = VarHList
   type 'a def
 
+  val app : ('tup -> 'a) exp -> 'tup ExpLimitList.limit -> 'a exp
   val define :
-    ('tup -> 'a) var -> 'tup VarHList.hlist -> 'a exp -> 'b def -> 'b def
+    ('tup -> 'a) var -> 'tup VarLimitList.limit -> 'a exp -> 'b def -> 'b def
   val body : 'a exp -> 'a def
   val endd : unit -> 'a def
 
@@ -71,6 +135,7 @@ module type R4_Let = sig
     }
   end
 
+  val ( $ ) : ('tup -> 'a) exp -> 'tup ExpHList.hlist -> 'a exp
   val ( @> ) :
     'r UnitHList.hlist -> ('r VarHList.hlist -> 'a exp) -> ('r, 'a) Wrapped.t
   val ( let@ ) : ('tup, 'a) Wrapped.t -> (('tup -> 'a) var -> 'b def) -> 'b def
@@ -97,28 +162,30 @@ module R3_of_F1_Collect (F : F1_Collect) = struct
   let program e = F.program (body e)
 end
 
-module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) :
-  R4_Shrink
-    with type 'a exp = R.t -> 'a F.exp
-     and type 'a def = R.t -> 'a F.def
-     and type 'a program = unit -> 'a F.program
-     and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs
-     and module VarHList = F.VarHList = struct
+module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) = struct
   include Chapter5.R3_Shrink_R_T (R) (R3_of_R4_Shrink (F))
+  module ExpLimitList = LimitFn (ExpHList)
   module VarHList = F.VarHList
+  module VarLimitList = F.VarLimitList
   type 'a def = R.t -> 'a F.def
 
-  let ( $ ) e es r =
-    let rec go : type t. t ExpHList.hlist -> t F.ExpHList.hlist = function
-      | ExpHList.(x :: xs) ->
-        let x = x r in
-        F.ExpHList.(x :: go xs)
-      | ExpHList.[] -> F.ExpHList.[]
+  let app e es r =
+    let go : type t. t ExpLimitList.limit -> t F.ExpLimitList.limit = function
+      | ExpLimitList.LX (a, b, c, d, e, f) ->
+        F.ExpLimitList.LX (a r, b r, c r, d r, e r, f r)
+      | ExpLimitList.L6 (a, b, c, d, e, f) ->
+        F.ExpLimitList.L6 (a r, b r, c r, d r, e r, f r)
+      | ExpLimitList.L5 (a, b, c, d, e) ->
+        F.ExpLimitList.L5 (a r, b r, c r, d r, e r)
+      | ExpLimitList.L4 (a, b, c, d) -> F.ExpLimitList.L4 (a r, b r, c r, d r)
+      | ExpLimitList.L3 (a, b, c) -> F.ExpLimitList.L3 (a r, b r, c r)
+      | ExpLimitList.L2 (a, b) -> F.ExpLimitList.L2 (a r, b r)
+      | ExpLimitList.L1 e -> F.ExpLimitList.L1 (e r)
+      | ExpLimitList.L0 -> F.ExpLimitList.L0
     in
     let e = e r in
     let es = go es in
-    F.( $ ) e es
+    F.app e es
 
   let define v vs e rest r =
     let e = e r in
@@ -133,6 +200,11 @@ module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) :
     F.program (def init)
 end
 
+module R4_R_T (R : Chapter1.Reader) (F : R4) = struct
+  include Chapter4.R2_R_T (R) (R3_of_R4 (F))
+  include R4_Shrink_R_T (R) (F)
+end
+
 module R4_Shrink_T
     (X_exp : Chapter1.TRANS)
     (X_def : Chapter1.TRANS)
@@ -145,15 +217,27 @@ module R4_Shrink_T
 struct
   include Chapter5.R3_Shrink_T (X_exp) (X_program) (R3_of_R4_Shrink (F))
   type 'a def = 'a X_def.term
+  module ExpLimitList = LimitFn (ExpHList)
   module VarHList = F.VarHList
+  module VarLimitList = F.VarLimitList
   open X_exp
 
-  let ( $ ) f es =
-    let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
-      | ExpHList.(x :: xs) -> F.ExpHList.(bwd x :: go xs)
-      | ExpHList.[] -> F.ExpHList.[]
+  let app f es =
+    let go : type r. r ExpLimitList.limit -> r F.ExpLimitList.limit = function
+      | ExpLimitList.LX (a, b, c, d, e, f) ->
+        F.ExpLimitList.LX (bwd a, bwd b, bwd c, bwd d, bwd e, bwd f)
+      | ExpLimitList.L6 (a, b, c, d, e, f) ->
+        F.ExpLimitList.L6 (bwd a, bwd b, bwd c, bwd d, bwd e, bwd f)
+      | ExpLimitList.L5 (a, b, c, d, e) ->
+        F.ExpLimitList.L5 (bwd a, bwd b, bwd c, bwd d, bwd e)
+      | ExpLimitList.L4 (a, b, c, d) ->
+        F.ExpLimitList.L4 (bwd a, bwd b, bwd c, bwd d)
+      | ExpLimitList.L3 (a, b, c) -> F.ExpLimitList.L3 (bwd a, bwd b, bwd c)
+      | ExpLimitList.L2 (a, b) -> F.ExpLimitList.L2 (bwd a, bwd b)
+      | ExpLimitList.L1 e -> F.ExpLimitList.L1 (bwd e)
+      | ExpLimitList.L0 -> F.ExpLimitList.L0
     in
-    fwd @@ F.( $ ) (bwd f) (go es)
+    fwd @@ F.app (bwd f) (go es)
   let define v vs body rest =
     X_def.fwd @@ F.define v vs (bwd body) (X_def.bwd rest)
   let body e = X_def.fwd @@ F.body (bwd e)
@@ -215,20 +299,23 @@ struct
   include Chapter5.R3_Collect_T (X_exp) (X_program) (R3_of_F1_Collect (F))
 end
 
+module StringHashtbl = Hashtbl.Make (String)
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
-  module X_def = Chapter1.MkId (struct
-    type 'a t = 'a F.def
-  end)
-  module IDelta = struct
+  module R = struct
+    type t = { mutable to_exp : 'a. string -> 'a F.exp }
+    let init () = { to_exp = (fun v -> F.var (F.var_of_string v)) }
+  end
+  module IDelta (F' : R4 with type 'a exp = R.t -> 'a F.exp) = struct
     include IDelta
+    open F'
     module UnitHList = Chapter5.HListFn (struct
       type 'a t = unit
     end)
     module Wrapped = struct
       type ('r, 'a) t = {
         realized : 'r UnitHList.hlist;
-        fn : 'r F.VarHList.hlist -> 'a F.exp;
+        fn : 'r F.VarHList.hlist -> 'a F'.exp;
       }
     end
     module FnHList = FnHListFn (struct
@@ -243,46 +330,76 @@ module TransformLetPass (F : R4) = struct
     let ( @> ) realized fn = Wrapped.{ realized; fn }
     let ( @@> ) realized fn = Wrapped2.{ realized; fn }
 
-    let let_helper var f g =
+    let ( $ ) f es r =
+      let f = f r in
+      let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
+        | ExpHList.(x :: xs) -> F.ExpHList.(x r :: go xs)
+        | ExpHList.[] -> F.ExpHList.[]
+      in
+      let es = F.ExpLimitList.transform { f = (fun l -> F.vector l) } (go es) in
+      F.app f es
+
+    let var v r = r.R.to_exp (F.string_of_var v)
+
+    let let_helper var f g r =
       let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
         | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
         | UnitHList.[] -> F.VarHList.[]
       in
       let params = go f.Wrapped.realized in
-      let body = f.fn params in
-      let rest = g var in
-      F.define var params body rest
+      let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
+        let tuple_var = F.fresh () in
+        let rec go : type a tup t.
+            t F.VarHList.hlist * (a, tup) Chapter5.ptr -> unit = function
+          | F.VarHList.(x :: xs), ptr ->
+            let x : string = F.string_of_var x in
+            let old_handler = r.R.to_exp in
+            r.to_exp <-
+              (fun v ->
+                if Stdlib.( = ) x v then
+                  F.vector_ref (F.var tuple_var) (Obj.magic ptr)
+                else
+                  old_handler v);
+            go (xs, Chapter5.Next ptr)
+          | F.VarHList.[], _ -> ()
+        in
+        go (l, Here);
+        tuple_var
+      in
+      let params' = F.VarLimitList.transform { f = tuple_handler } params in
+      let body = f.fn params r in
+      let rest = g var r in
+      F.define var params' body rest
 
-    let ( let@ ) f g = let_helper (F.fresh ()) f g
+    let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
-    let ( let@@ ) f g =
+    let ( let@@ ) f g r =
       let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
         | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
         | UnitHList.[] -> F.VarHList.[]
       in
       let vars = go f.Wrapped2.realized in
       let fns = f.fn vars in
-      let rest = g vars in
+      let rest = g vars r in
       let rec go : type r. r FnHList.hlist * r F.VarHList.hlist -> 'a F.def =
         function
         | FnHList.(wrapped :: xs), F.VarHList.(v :: vs) ->
-          let_helper v wrapped (fun _ -> go (xs, vs))
+          let_helper v wrapped (fun _ -> fun _ -> go (xs, vs)) r
         | FnHList.[], F.VarHList.[] -> rest
       in
       go (fns, vars)
 
-    let program def = X_program.fwd (F.program (X_def.bwd def))
+    let program def () =
+      let init = R.init () in
+      F.program (def init)
   end
 end
-module TransformLet (F : R4) :
-  R4_Let
-    with type 'a exp = 'a F.exp
-     and type 'a program = 'a F.program
-     and type 'a def = 'a F.def
-     and type 'a obs = 'a F.obs = struct
+
+module TransformLet (F : R4) : R4_Let with type 'a obs = 'a F.obs = struct
   module M = TransformLetPass (F)
-  include R4_T (M.X_exp) (M.X_def) (M.X_program) (F)
-  include M.IDelta
+  module R = R4_R_T (M.R) (F)
+  include R
+  include M.IDelta (R)
 end
 
 module ShrinkPass (F : R4_Shrink) = struct
@@ -293,7 +410,7 @@ module ShrinkPass (F : R4_Shrink) = struct
 
   module IDelta = struct
     include IDelta
-    let body e = F.define (F.var_of_string "main") [] e (F.endd ())
+    let body e = F.define (F.var_of_string "main") L0 e (F.endd ())
   end
 end
 module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
@@ -302,7 +419,6 @@ module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module StringHashtbl = Hashtbl.Make (String)
 module RevealFunctionsPass (F : F1) = struct
   module R = struct
     type t = unit StringHashtbl.t
@@ -331,21 +447,39 @@ end
 module R4_Shrink_Pretty () = struct
   include Chapter5.R3_Pretty ()
   type 'a def = string
+  module ExpLimitList = LimitFn (ExpHList)
   module VarHList = Chapter5.HListFn (struct
     type 'a t = 'a var
   end)
+  module VarLimitList = LimitFn (VarHList)
 
-  let ( $ ) e es =
-    let rec go : type r. r ExpHList.hlist -> string = function
-      | ExpHList.(x :: xs) -> " " ^ x ^ go xs
-      | ExpHList.[] -> ""
+  let rec showList = function
+    | x :: xs -> " " ^ x ^ showList xs
+    | [] -> ""
+
+  let app fexp es =
+    let go : type a. a ExpLimitList.limit -> string = function
+      | ExpLimitList.LX (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
+      | ExpLimitList.L6 (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
+      | ExpLimitList.L5 (a, b, c, d, e) -> showList [ a; b; c; d; e ]
+      | ExpLimitList.L4 (a, b, c, d) -> showList [ a; b; c; d ]
+      | ExpLimitList.L3 (a, b, c) -> showList [ a; b; c ]
+      | ExpLimitList.L2 (a, b) -> showList [ a; b ]
+      | ExpLimitList.L1 e -> showList [ e ]
+      | ExpLimitList.L0 -> showList []
     in
-    "(" ^ e ^ go es ^ ")"
+    "(" ^ fexp ^ go es ^ ")"
 
   let define v vs e rest =
-    let rec go : type r. r VarHList.hlist -> string = function
-      | VarHList.(x :: xs) -> " " ^ x ^ go xs
-      | VarHList.[] -> ""
+    let go : type a. a VarLimitList.limit -> string = function
+      | VarLimitList.LX (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
+      | VarLimitList.L6 (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
+      | VarLimitList.L5 (a, b, c, d, e) -> showList [ a; b; c; d; e ]
+      | VarLimitList.L4 (a, b, c, d) -> showList [ a; b; c; d ]
+      | VarLimitList.L3 (a, b, c) -> showList [ a; b; c ]
+      | VarLimitList.L2 (a, b) -> showList [ a; b ]
+      | VarLimitList.L1 e -> showList [ e ]
+      | VarLimitList.L0 -> showList []
     in
     "(define (" ^ v ^ go vs ^ ")\n  " ^ e ^ ")\n" ^ rest
 
@@ -404,6 +538,18 @@ module Ex2 (F : R4_Let) = struct
     body (var is_even $ [ int 24 ])
 end
 
+module Ex3 (F : R4_Let) = struct
+  open F
+  let res =
+    observe @@ program
+    @@
+    let@ add =
+      [ (); (); (); (); (); (); () ] @> fun [ a; b; c; d; e; f; g ] ->
+      var a + var b + var c + var d + var e + var f + var g
+    in
+    body (var add $ [ int 1; int 2; int 3; int 4; int 5; int 6; int 7 ])
+end
+
 let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
   let module M = Ex1 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
   Format.printf "Ex1: %s" M.res;
@@ -431,5 +577,18 @@ let%expect_test "Example 2 RemoveLet, Shrink, and RevealFunctions" =
       (if (= (var tmp3) 0) f ((fun-ref tmp1) (+ (var tmp3) (- 1)))))
     (define (main)
       ((fun-ref tmp1) 24))
+    )
+    |}]
+
+let%expect_test "Example 3 RemoveLet, Shrink, and RevealFunctions" =
+  let module M = Ex3 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
+  Format.printf "Ex3: %s" M.res;
+  [%expect
+    {|
+    Ex3: (program
+    (define (tmp0 tmp7 tmp6 tmp5 tmp4 tmp3 tmp8)
+      (+ (+ (+ (+ (+ (+ (var tmp7) (var tmp6)) (var tmp5)) (var tmp4)) (var tmp3)) (vector-ref (var tmp8) 0)) (vector-ref (var tmp8) 1)))
+    (define (main)
+      ((fun-ref tmp0) 1 2 3 4 5 (vector 6 7)))
     )
     |}]

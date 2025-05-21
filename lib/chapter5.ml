@@ -17,11 +17,13 @@ module type HLIST = sig
     | ( :: ) : 'a el * 'b hlist -> ('a * 'b) hlist
   val proj : 'r hlist -> ('a, 'r) ptr -> 'a el
   val replace : 'r hlist -> ('a, 'r) ptr -> 'a el -> 'r hlist
+  val length : 'r hlist -> int
 end
 
 module HListFn (E : sig
   type 'a t
-end) : HLIST with type 'a el = 'a E.t = struct
+end) =
+struct
   type 'a el = 'a E.t
   type _ hlist =
     | [] : unit hlist
@@ -40,6 +42,14 @@ end) : HLIST with type 'a el = 'a E.t = struct
     | _ :: xs, Here -> e :: xs
     | x :: xs, Next n -> x :: replace xs n e
     | [], _ -> .
+
+  let length l =
+    let rec go : type r. int -> r hlist -> int =
+     fun acc -> function
+       | _ :: xs -> go (acc + 1) xs
+       | [] -> acc
+    in
+    go 0 l
 end
 
 module R3_Types = struct
@@ -249,12 +259,7 @@ module R3_Collect_Annotate_Types (F : R3_Collect) :
   let global_value name _ = (`Int, F.has_type (F.global_value name) `Int)
 end
 
-module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) :
-  R3_Shrink
-    with type 'a exp = R.t -> 'a F.exp
-     and type 'a program = unit -> 'a F.program
-     and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs = struct
+module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) = struct
   include Chapter4.R2_Shrink_R_T (R) (F)
   module ExpHList = HListFn (struct
     type 'a t = 'a exp
@@ -271,6 +276,11 @@ module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) :
     F.vector (go es)
   let vector_ref v ptr r = F.vector_ref (v r) ptr
   let vector_set v ptr e r = F.vector_set (v r) ptr (e r)
+end
+
+module R3_R_T (R : Chapter1.Reader) (F : R3) = struct
+  include Chapter4.R2_R_T (R) (F)
+  include R3_Shrink_R_T (R) (F)
 end
 
 module R3_Shrink_T
@@ -325,13 +335,9 @@ struct
   let global_value name = fwd @@ F.global_value name
 end
 
-module TransformLet (F : R3) :
-  R3_Let
-    with type 'a exp = 'a F.exp
-     and type 'a program = 'a F.program
-     and type 'a obs = 'a F.obs = struct
+module TransformLet (F : R3) : R3_Let with type 'a obs = 'a F.obs = struct
   module M = Chapter2_definitions.TransformLetPass (F)
-  include R3_T (M.X_exp) (M.X_program) (F)
+  include R3_R_T (M.R) (F)
   include M.IDelta
 end
 
@@ -401,8 +407,8 @@ module type C2 = sig
   include Chapter4.C1
   val has_type : 'a exp -> R3_Types.typ -> 'a exp
   val allocate : int -> R3_Types.typ -> 'a exp
-  val vector_ref : 'tup arg -> ('a, 'tup) ptr -> 'a exp
-  val vector_set : 'tup arg -> ('a, 'tup) ptr -> 'a arg -> unit exp
+  val vector_ref : 'tup arg -> int -> 'a exp
+  val vector_set : 'tup arg -> int -> 'a arg -> unit exp
   val global_value : string -> int exp
   val void : unit exp
 
@@ -514,7 +520,9 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
     let tmp = F.(string_of_var (fresh ())) in
     e ann_id
       (Assign
-         (tmp, fun () -> convert_exp C2.(vector_ref (var (lookup tmp)) ptr) m r))
+         ( tmp,
+           fun () ->
+             convert_exp C2.(vector_ref (var (lookup tmp)) (ptr_num ptr)) m r ))
   let vector_set e ptr v m r =
     let tmp1 = F.(string_of_var (fresh ())) in
     let tmp2 = F.(string_of_var (fresh ())) in
@@ -528,7 +536,10 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
                     fun () ->
                       convert_exp
                         C2.(
-                          vector_set (var (lookup tmp1)) ptr (var (lookup tmp2)))
+                          vector_set
+                            (var (lookup tmp1))
+                            (ptr_num ptr)
+                            (var (lookup tmp2)))
                         m r )) ))
 
   let collect i _ = function
@@ -595,8 +606,7 @@ module SelectInstructions (F : C2) (X86 : X86_2) :
     | Assign v -> create (X86.var v)
     | Return -> create X86.(reg rax)
     | If _ -> failwith "allocate cannot be used in an if statement"
-  let vector_ref (_, vec) ptr =
-    let n = ptr_num ptr in
+  let vector_ref (_, vec) n =
     let off = Int.(8 * add n 1) in
     function
     | Assign v -> X86.[ movq (deref r11 off) (var v); movq vec (reg r11) ]
@@ -604,8 +614,7 @@ module SelectInstructions (F : C2) (X86 : X86_2) :
     | If (t, f) ->
       X86.
         [ jmp t; jmp_if E f; cmpq (int 0) (deref r11 off); movq vec (reg r11) ]
-  let vector_set (_, vec) ptr (_, arg) =
-    let n = ptr_num ptr in
+  let vector_set (_, vec) n (_, arg) =
     let off = Int.(8 * add n 1) in
     function
     | Assign v ->
@@ -810,10 +819,9 @@ module C2_Pretty = struct
   let has_type e typ = "(has-type " ^ e ^ " " ^ R3_Types.show_typ typ ^ ")"
   let allocate i typ =
     "(allocate " ^ string_of_int i ^ " " ^ R3_Types.show_typ typ ^ ")"
-  let vector_ref v ptr =
-    "(vector-ref " ^ v ^ " " ^ string_of_int (ptr_num ptr) ^ ")"
-  let vector_set v ptr r =
-    "(vector-set! " ^ v ^ " " ^ string_of_int (ptr_num ptr) ^ " " ^ r ^ ")"
+  let vector_ref v n = "(vector-ref " ^ v ^ " " ^ string_of_int n ^ ")"
+  let vector_set v n r =
+    "(vector-set! " ^ v ^ " " ^ string_of_int n ^ " " ^ r ^ ")"
   let global_value name = "(global-value " ^ name ^ ")"
   let void = "(void)"
   let collect i = "(collect " ^ string_of_int i ^ ")"
