@@ -69,8 +69,14 @@ module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
   let t _ = F.t
   let f _ = F.f
   let not a r = F.not (a r)
-  let ( = ) a b r = F.(a r = b r)
-  let ( < ) a b r = F.(a r < b r)
+  let ( = ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a = b)
+  let ( < ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a < b)
   let if_ a b c r =
     let a = a r in
     let b = b r in
@@ -80,13 +86,34 @@ end
 
 module R2_R_T (R : Chapter1.Reader) (F : R2) = struct
   include R2_Shrink_R_T (R) (F)
-  let ( - ) a b r = F.(a r - b r)
-  let andd a b r = F.andd (a r) (b r)
-  let orr a b r = F.orr (a r) (b r)
-  let ( <> ) a b r = F.(a r <> b r)
-  let ( <= ) a b r = F.(a r <= b r)
-  let ( > ) a b r = F.(a r > b r)
-  let ( >= ) a b r = F.(a r >= b r)
+  let ( - ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a - b)
+  let andd a b r =
+    let a = a r in
+    let b = b r in
+    F.andd a b
+  let orr a b r =
+    let a = a r in
+    let b = b r in
+    F.orr a b
+  let ( <> ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a <> b)
+  let ( <= ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a <= b)
+  let ( > ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a > b)
+  let ( >= ) a b r =
+    let a = a r in
+    let b = b r in
+    F.(a >= b)
 end
 
 module R2_Shrink_Pretty () = struct
@@ -799,8 +826,8 @@ let%expect_test "Explicate control with conditional that creates blocks" =
   [%expect
     {|
     Ex5: (program ((locals . ())) ((start . (seq (assign tmp0 1) (seq (assign tmp10 5) (if (< tmp0 tmp10) block_t2 block_f3))))
-    (block_t0 . (seq (assign tmp2 5) (seq (assign tmp3 6) (return (+ tmp2 tmp3)))))
-    (block_f1 . (seq (assign tmp6 1) (seq (assign tmp1 (neg tmp6)) (return (+ tmp0 tmp1)))))
+    (block_t0 . (seq (assign tmp1 5) (seq (assign tmp2 6) (return (+ tmp1 tmp2)))))
+    (block_f1 . (seq (assign tmp6 1) (seq (assign tmp3 (neg tmp6)) (return (+ tmp0 tmp3)))))
     (block_t2 . (goto block_t0))
     (block_f3 . (goto block_f1)))
     |}]
@@ -820,10 +847,10 @@ let%expect_test "Explicate control with nots, nested ifs, booleans in ifs" =
     (block_t0 . (seq (assign tmp3 10) (seq (assign tmp7 1) (seq (assign tmp4 (neg tmp7)) (seq (assign tmp5 (+ tmp3 tmp4)) (return (+ tmp5 tmp3)))))))
     (block_f5 . (if (< tmp0 tmp1) block_t3 block_f4))
     (block_t10 . (goto block_t0))
-    (block_f2 . (seq (assign tmp2 (neg tmp1)) (return (+ tmp0 tmp2))))
+    (block_f2 . (seq (assign tmp6 (neg tmp1)) (return (+ tmp0 tmp6))))
     (block_t7 . (goto block_f5))
     (block_t6 . (goto block_f5))
-    (block_t9 . (seq (assign tmp6 t) (if tmp6 block_t7 block_f8)))
+    (block_t9 . (seq (assign tmp2 t) (if tmp2 block_t7 block_f8)))
     (block_f13 . (seq (assign tmp22 7) (if (= tmp1 tmp22) block_t9 block_f12)))
     (block_f11 . (goto block_f5))
     (block_t1 . (return (+ tmp0 tmp1)))
@@ -873,18 +900,18 @@ let%expect_test "Select instructions" =
     (block_t10 . (block ()
     (jmp block_t0)))
     (block_f2 . (block ()
-    (movq (var tmp1) (var tmp2))
-    (negq (var tmp2))
+    (movq (var tmp1) (var tmp6))
+    (negq (var tmp6))
     (movq (var tmp0) (reg rax))
-    (addq (var tmp2) (reg rax))
+    (addq (var tmp6) (reg rax))
     (jmp block_exit)))
     (block_t7 . (block ()
     (jmp block_f5)))
     (block_t6 . (block ()
     (jmp block_f5)))
     (block_t9 . (block ()
-    (movq (int 1) (var tmp6))
-    (cmpq (int 0) (var tmp6))
+    (movq (int 1) (var tmp2))
+    (cmpq (int 0) (var tmp2))
     (jmp-if Chapter4.CC.E block_f8)
     (jmp block_t7)))
     (block_f13 . (block ()
@@ -938,9 +965,9 @@ let%expect_test "Uncover live" =
     (cmpq (var tmp22) (var tmp1))
     (jmp-if Chapter4.CC.E block_t9)
     (jmp block_f12)))
-    (block_t9 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp6}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
-    (movq (int 1) (var tmp6))
-    (cmpq (int 0) (var tmp6))
+    (block_t9 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp2}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
+    (movq (int 1) (var tmp2))
+    (cmpq (int 0) (var tmp2))
     (jmp-if Chapter4.CC.E block_f8)
     (jmp block_t7)))
     (block_f12 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp24}; {tmp0; tmp1}; {tmp0; tmp1};
@@ -980,11 +1007,11 @@ let%expect_test "Uncover live" =
     (movq (var tmp0) (reg rax))
     (addq (var tmp1) (reg rax))
     (jmp block_exit)))
-    (block_f2 . (block ([{tmp0; tmp1}; {tmp0; tmp2}; {tmp0; tmp2}; {tmp2}; {}; {}])
-    (movq (var tmp1) (var tmp2))
-    (negq (var tmp2))
+    (block_f2 . (block ([{tmp0; tmp1}; {tmp0; tmp6}; {tmp0; tmp6}; {tmp6}; {}; {}])
+    (movq (var tmp1) (var tmp6))
+    (negq (var tmp6))
     (movq (var tmp0) (reg rax))
-    (addq (var tmp2) (reg rax))
+    (addq (var tmp6) (reg rax))
     (jmp block_exit)))
     (block_exit . (block ([{}; {}])
     (retq))))
@@ -1021,10 +1048,10 @@ let%expect_test "Allocate Registers" =
       subq $0, %rsp
     start:
 
-      movq $5, %rdx
-      movq $6, %rcx
+      movq $5, %rcx
+      movq $6, %rdx
       movq $5, %rbx
-      cmpq %rbx, %rdx
+      cmpq %rbx, %rcx
       jl block_t6
       jmp block_f13
     block_t6:
@@ -1033,7 +1060,7 @@ let%expect_test "Allocate Registers" =
     block_f13:
 
       movq $7, %rbx
-      cmpq %rbx, %rcx
+      cmpq %rbx, %rdx
       je block_t9
       jmp block_f12
     block_t9:
@@ -1045,7 +1072,7 @@ let%expect_test "Allocate Registers" =
     block_f12:
 
       movq $6, %rbx
-      cmpq %rbx, %rcx
+      cmpq %rbx, %rdx
       je block_t10
       jmp block_f11
     block_t7:
@@ -1073,7 +1100,7 @@ let%expect_test "Allocate Registers" =
       jmp block_exit
     block_f5:
 
-      cmpq %rcx, %rdx
+      cmpq %rdx, %rcx
       jl block_t3
       jmp block_f4
     block_t3:
@@ -1084,14 +1111,15 @@ let%expect_test "Allocate Registers" =
       jmp block_f2
     block_t1:
 
-      movq %rdx, %rax
-      addq %rcx, %rax
+      movq %rcx, %rax
+      addq %rdx, %rax
       jmp block_exit
     block_f2:
 
-      negq %rcx
-      movq %rdx, %rax
-      addq %rcx, %rax
+      movq %rdx, %rbx
+      negq %rbx
+      movq %rcx, %rax
+      addq %rbx, %rax
       jmp block_exit
     block_exit:
 

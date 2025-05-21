@@ -225,14 +225,7 @@ struct
   include Chapter4.R2_T (X_exp) (X_program) (R3_of_R4 (F))
 end
 
-module F1_R_T (R : Chapter1.Reader) (F : F1) :
-  F1
-    with type 'a exp = R.t -> 'a F.exp
-     and type 'a def = R.t -> 'a F.def
-     and type 'a program = unit -> 'a F.program
-     and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs
-     and module VarHList = F.VarHList = struct
+module F1_R_T (R : Chapter1.Reader) (F : F1) = struct
   include R4_Shrink_R_T (R) (F)
   let fun_ref label _ = F.fun_ref label
 end
@@ -317,27 +310,28 @@ module TransformLetPass (F : R4) = struct
         | [] -> []
       in
       let params = go f.Wrapped.realized in
+      let r' = R.{ to_exp = r.to_exp } in
       let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
         let tuple_var = F.fresh () in
         let rec go : type a tup t.
             t F.VarHList.hlist * (a, tup) Chapter5.ptr -> unit = function
-          | F.VarHList.(x :: xs), ptr ->
+          | x :: xs, ptr ->
             let x : string = F.string_of_var x in
-            let old_handler = r.R.to_exp in
-            r.to_exp <-
+            let old_handler = r'.to_exp in
+            r'.to_exp <-
               (fun v ->
                 if Stdlib.( = ) x v then
                   F.vector_ref (F.var tuple_var) (Obj.magic ptr)
                 else
                   old_handler v);
             go (xs, Chapter5.Next ptr)
-          | F.VarHList.[], _ -> ()
+          | [], _ -> ()
         in
         go (l, Here);
         tuple_var
       in
       let params' = F.VarLimitList.transform { f = tuple_handler } params in
-      let body = f.fn params r in
+      let body = f.fn params r' in
       let rest = g var r in
       F.define var params' body rest
 
@@ -355,9 +349,9 @@ module TransformLetPass (F : R4) = struct
       let rest = g vars r in
       let rec go : type r. r FnHList.hlist * r F.VarHList.hlist -> 'a F.def =
         function
-        | FnHList.(wrapped :: xs), F.VarHList.(v :: vs) ->
+        | wrapped :: xs, v :: vs ->
           let_helper v wrapped (fun _ -> fun _ -> go (xs, vs)) r
-        | FnHList.[], F.VarHList.[] -> rest
+        | [], [] -> rest
       in
       go (fns, vars)
 
@@ -382,7 +376,7 @@ module ShrinkPass (F : R4_Shrink) = struct
 
   module IDelta = struct
     include IDelta
-    let body e = F.define (F.var_of_string "main") (L []) e (F.endd ())
+    let body e = F.(define (var_of_string "main") (L []) e (endd ()))
   end
 end
 module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct

@@ -210,11 +210,11 @@ module R3_Annotate_Types (F : R3_Shrink) :
   let vector hl m =
     let rec go : type a. a ExpHList.hlist -> typ list * a F.ExpHList.hlist =
       function
-      | ExpHList.(e :: xs) ->
+      | e :: xs ->
         let typ, e = e m in
         let res_typs, res_es = go xs in
-        (typ :: res_typs, F.ExpHList.(e :: res_es))
-      | ExpHList.[] -> ([], F.ExpHList.[])
+        (typ :: res_typs, e :: res_es)
+      | [] -> ([], [])
     in
     let res_typs, res_es = go hl in
     (`Vector res_typs, F.has_type (F.vector res_es) (`Vector res_typs))
@@ -268,14 +268,17 @@ module R3_Shrink_R_T (R : Chapter1.Reader) (F : R3_Shrink) = struct
   let void _ = F.void
   let vector es r =
     let rec go : type t. t ExpHList.hlist -> t F.ExpHList.hlist = function
-      | ExpHList.(x :: xs) ->
+      | x :: xs ->
         let x = x r in
-        F.ExpHList.(x :: go xs)
-      | ExpHList.[] -> F.ExpHList.[]
+        x :: go xs
+      | [] -> []
     in
     F.vector (go es)
   let vector_ref v ptr r = F.vector_ref (v r) ptr
-  let vector_set v ptr e r = F.vector_set (v r) ptr (e r)
+  let vector_set v ptr e r =
+    let v = v r in
+    let e = e r in
+    F.vector_set v ptr e
 end
 
 module R3_R_T (R : Chapter1.Reader) (F : R3) = struct
@@ -300,8 +303,8 @@ struct
   let void = fwd F.void
   let vector hl =
     let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
-      | ExpHList.(x :: xs) -> F.ExpHList.(bwd x :: go xs)
-      | ExpHList.[] -> F.ExpHList.[]
+      | x :: xs -> bwd x :: go xs
+      | [] -> []
     in
     fwd @@ F.vector @@ go hl
   let vector_ref e ptr = fwd @@ F.vector_ref (bwd e) ptr
@@ -361,11 +364,11 @@ module ExposeAllocation (F : R3_Collect) :
   let vector_helper hl m =
     let rec go : type a.
         a ExpHList.hlist -> R3_Types.typ list * a F.ExpHList.hlist = function
-      | ExpHList.(e :: xs) ->
+      | e :: xs ->
         let typ, e = e m in
         let res_typs, res_es = go xs in
-        (typ :: res_typs, F.ExpHList.(e :: res_es))
-      | ExpHList.[] -> ([], F.ExpHList.[])
+        (typ :: res_typs, e :: res_es)
+      | [] -> ([], [])
     in
     go hl
 
@@ -387,14 +390,14 @@ module ExposeAllocation (F : R3_Collect) :
           R3_Types.typ list -> r F.ExpHList.hlist -> (a, tup) ptr -> tup exp =
        fun tys hl ptr ->
         match (tys, hl) with
-        | ty :: tys, F.ExpHList.(e :: es) ->
+        | ty :: tys, e :: es ->
           let ptr = Obj.magic @@ Next ptr in
           lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
           @@ go tys es ptr
         | _ -> var alloc
       in
       match (vtys, ves) with
-      | ty :: tys, F.ExpHList.(e :: es) ->
+      | ty :: tys, e :: es ->
         let ptr = Here in
         lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
         @@ go tys es ptr
@@ -796,8 +799,8 @@ module R3_Pretty () = struct
   let void = "(void)"
   let vector hl =
     let rec go : type r. r ExpHList.hlist -> string = function
-      | ExpHList.(x :: xs) -> " " ^ x ^ go xs
-      | ExpHList.[] -> ""
+      | x :: xs -> " " ^ x ^ go xs
+      | [] -> ""
     in
     "(vector" ^ go hl ^ ")"
   let vector_ref v ptr =
@@ -914,7 +917,7 @@ module Ex1 (F : R3_Let) = struct
   let res =
     observe @@ program
     @@
-    let* t1 = vector ExpHList.[ int 1; t ] in
+    let* t1 = vector [ int 1; t ] in
     let* t2 = var t1 in
     let* _ = vector_set (var t2) Here (int 42) in
     let* _ = vector_set (var t2) (Next Here) f in
@@ -925,9 +928,7 @@ module Ex2 (F : R3) = struct
   open F
   let res =
     observe @@ program
-    @@ vector_ref
-         (vector_ref (vector ExpHList.[ vector ExpHList.[ int 42 ] ]) Here)
-         Here
+    @@ vector_ref (vector_ref (vector [ vector [ int 42 ] ]) Here) Here
 end
 
 module Ex3 (F : R3_Let) = struct
@@ -938,11 +939,10 @@ module Ex3 (F : R3_Let) = struct
     @@
     let* v =
       vector
-        ExpHList.
-          [
-            (let* a = int 1 in
-             var a + int 2);
-          ]
+        [
+          (let* a = int 1 in
+           var a + int 2);
+        ]
     in
     let* _ =
       vector_set (var v) Here

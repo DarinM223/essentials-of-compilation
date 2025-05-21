@@ -36,12 +36,7 @@ module R1_T
   let lett v e b = fwd @@ F.lett v (bwd e) (bwd b)
 end
 
-module R1_R_T (R : Chapter1.Reader) (F : R1) :
-  R1
-    with type 'a exp = R.t -> 'a F.exp
-     and type 'a program = unit -> 'a F.program
-     and type 'a var = 'a F.var
-     and type 'a obs = 'a F.obs = struct
+module R1_R_T (R : Chapter1.Reader) (F : R1) = struct
   include Chapter1.R0_R_T (R) (F)
   type 'a var = 'a F.var
 
