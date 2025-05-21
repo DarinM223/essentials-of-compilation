@@ -14,21 +14,9 @@ module type LIMIT = sig
 
   type _ limit =
     | LX :
-        'a el * 'b el * 'c el * 'd el * 'e el * ('f * 'g) el
+        ('a * ('b * ('c * ('d * ('e * (('f * 'g) * unit)))))) hlist
         -> ('a * ('b * ('c * ('d * ('e * ('f * 'g)))))) limit
-    | L6 :
-        'a el * 'b el * 'c el * 'd el * 'e el * 'f el
-        -> ('a * ('b * ('c * ('d * ('e * ('f * unit)))))) limit
-    | L5 :
-        'a el * 'b el * 'c el * 'd el * 'e el
-        -> ('a * ('b * ('c * ('d * ('e * unit))))) limit
-    | L4 :
-        'a el * 'b el * 'c el * 'd el
-        -> ('a * ('b * ('c * ('d * unit)))) limit
-    | L3 : 'a el * 'b el * 'c el -> ('a * ('b * ('c * unit))) limit
-    | L2 : 'a el * 'b el -> ('a * ('b * unit)) limit
-    | L1 : 'a el -> ('a * unit) limit
-    | L0 : unit limit
+    | L : 'r hlist -> 'r limit
 
   type convert = { f : 'a. 'a hlist -> 'a el }
   val transform : convert -> 't hlist -> 't limit
@@ -40,34 +28,17 @@ module LimitFn (HList : Chapter5.HLIST) = struct
 
   type _ limit =
     | LX :
-        'a el * 'b el * 'c el * 'd el * 'e el * ('f * 'g) el
+        ('a * ('b * ('c * ('d * ('e * (('f * 'g) * unit)))))) hlist
         -> ('a * ('b * ('c * ('d * ('e * ('f * 'g)))))) limit
-    | L6 :
-        'a el * 'b el * 'c el * 'd el * 'e el * 'f el
-        -> ('a * ('b * ('c * ('d * ('e * ('f * unit)))))) limit
-    | L5 :
-        'a el * 'b el * 'c el * 'd el * 'e el
-        -> ('a * ('b * ('c * ('d * ('e * unit))))) limit
-    | L4 :
-        'a el * 'b el * 'c el * 'd el
-        -> ('a * ('b * ('c * ('d * unit)))) limit
-    | L3 : 'a el * 'b el * 'c el -> ('a * ('b * ('c * unit))) limit
-    | L2 : 'a el * 'b el -> ('a * ('b * unit)) limit
-    | L1 : 'a el -> ('a * unit) limit
-    | L0 : unit limit
+    | L : 'r hlist -> 'r limit
 
   type convert = { f : 'a. 'a hlist -> 'a el }
 
   let transform (type t) conv (xs : t hlist) : t limit =
     match xs with
-    | [ a; b; c; d; e; f ] -> L6 (a, b, c, d, e, f)
-    | a :: b :: c :: d :: e :: f :: g -> LX (a, b, c, d, e, conv.f (f :: g))
-    | [ a; b; c; d; e ] -> L5 (a, b, c, d, e)
-    | [ a; b; c; d ] -> L4 (a, b, c, d)
-    | [ a; b; c ] -> L3 (a, b, c)
-    | [ a; b ] -> L2 (a, b)
-    | [ a ] -> L1 a
-    | [] -> L0
+    | [ _; _; _; _; _; _ ] -> L xs
+    | a :: b :: c :: d :: e :: f :: g -> LX [ a; b; c; d; e; conv.f (f :: g) ]
+    | _ -> L xs
 end
 
 module type R4_Shrink = sig
@@ -170,18 +141,16 @@ module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) = struct
   type 'a def = R.t -> 'a F.def
 
   let app e es r =
+    let rec convert_hlist : type t. t ExpHList.hlist -> t F.ExpHList.hlist =
+      function
+      | x :: xs ->
+        let x = x r in
+        x :: convert_hlist xs
+      | [] -> []
+    in
     let go : type t. t ExpLimitList.limit -> t F.ExpLimitList.limit = function
-      | ExpLimitList.LX (a, b, c, d, e, f) ->
-        F.ExpLimitList.LX (a r, b r, c r, d r, e r, f r)
-      | ExpLimitList.L6 (a, b, c, d, e, f) ->
-        F.ExpLimitList.L6 (a r, b r, c r, d r, e r, f r)
-      | ExpLimitList.L5 (a, b, c, d, e) ->
-        F.ExpLimitList.L5 (a r, b r, c r, d r, e r)
-      | ExpLimitList.L4 (a, b, c, d) -> F.ExpLimitList.L4 (a r, b r, c r, d r)
-      | ExpLimitList.L3 (a, b, c) -> F.ExpLimitList.L3 (a r, b r, c r)
-      | ExpLimitList.L2 (a, b) -> F.ExpLimitList.L2 (a r, b r)
-      | ExpLimitList.L1 e -> F.ExpLimitList.L1 (e r)
-      | ExpLimitList.L0 -> F.ExpLimitList.L0
+      | LX l -> LX (convert_hlist l)
+      | L l -> L (convert_hlist l)
     in
     let e = e r in
     let es = go es in
@@ -223,19 +192,16 @@ struct
   open X_exp
 
   let app f es =
+    let rec convert_hlist : type t. t ExpHList.hlist -> t F.ExpHList.hlist =
+      function
+      | x :: xs ->
+        let x = bwd x in
+        x :: convert_hlist xs
+      | [] -> []
+    in
     let go : type r. r ExpLimitList.limit -> r F.ExpLimitList.limit = function
-      | ExpLimitList.LX (a, b, c, d, e, f) ->
-        F.ExpLimitList.LX (bwd a, bwd b, bwd c, bwd d, bwd e, bwd f)
-      | ExpLimitList.L6 (a, b, c, d, e, f) ->
-        F.ExpLimitList.L6 (bwd a, bwd b, bwd c, bwd d, bwd e, bwd f)
-      | ExpLimitList.L5 (a, b, c, d, e) ->
-        F.ExpLimitList.L5 (bwd a, bwd b, bwd c, bwd d, bwd e)
-      | ExpLimitList.L4 (a, b, c, d) ->
-        F.ExpLimitList.L4 (bwd a, bwd b, bwd c, bwd d)
-      | ExpLimitList.L3 (a, b, c) -> F.ExpLimitList.L3 (bwd a, bwd b, bwd c)
-      | ExpLimitList.L2 (a, b) -> F.ExpLimitList.L2 (bwd a, bwd b)
-      | ExpLimitList.L1 e -> F.ExpLimitList.L1 (bwd e)
-      | ExpLimitList.L0 -> F.ExpLimitList.L0
+      | LX l -> LX (convert_hlist l)
+      | L l -> L (convert_hlist l)
     in
     fwd @@ F.app (bwd f) (go es)
   let define v vs body rest =
@@ -333,8 +299,10 @@ module TransformLetPass (F : R4) = struct
     let ( $ ) f es r =
       let f = f r in
       let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
-        | ExpHList.(x :: xs) -> F.ExpHList.(x r :: go xs)
-        | ExpHList.[] -> F.ExpHList.[]
+        | x :: xs ->
+          let x = x r in
+          x :: go xs
+        | [] -> []
       in
       let es = F.ExpLimitList.transform { f = (fun l -> F.vector l) } (go es) in
       F.app f es
@@ -343,8 +311,10 @@ module TransformLetPass (F : R4) = struct
 
     let let_helper var f g r =
       let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
-        | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
-        | UnitHList.[] -> F.VarHList.[]
+        | _ :: xs ->
+          let v = F.fresh () in
+          v :: go xs
+        | [] -> []
       in
       let params = go f.Wrapped.realized in
       let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
@@ -375,8 +345,10 @@ module TransformLetPass (F : R4) = struct
 
     let ( let@@ ) f g r =
       let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
-        | UnitHList.(_ :: xs) -> F.VarHList.(F.fresh () :: go xs)
-        | UnitHList.[] -> F.VarHList.[]
+        | _ :: xs ->
+          let v = F.fresh () in
+          v :: go xs
+        | [] -> []
       in
       let vars = go f.Wrapped2.realized in
       let fns = f.fn vars in
@@ -410,7 +382,7 @@ module ShrinkPass (F : R4_Shrink) = struct
 
   module IDelta = struct
     include IDelta
-    let body e = F.define (F.var_of_string "main") L0 e (F.endd ())
+    let body e = F.define (F.var_of_string "main") (L []) e (F.endd ())
   end
 end
 module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
@@ -453,33 +425,25 @@ module R4_Shrink_Pretty () = struct
   end)
   module VarLimitList = LimitFn (VarHList)
 
-  let rec showList = function
-    | x :: xs -> " " ^ x ^ showList xs
-    | [] -> ""
-
   let app fexp es =
+    let rec show_hlist : type a. a ExpHList.hlist -> string = function
+      | x :: xs -> " " ^ x ^ show_hlist xs
+      | [] -> ""
+    in
     let go : type a. a ExpLimitList.limit -> string = function
-      | ExpLimitList.LX (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
-      | ExpLimitList.L6 (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
-      | ExpLimitList.L5 (a, b, c, d, e) -> showList [ a; b; c; d; e ]
-      | ExpLimitList.L4 (a, b, c, d) -> showList [ a; b; c; d ]
-      | ExpLimitList.L3 (a, b, c) -> showList [ a; b; c ]
-      | ExpLimitList.L2 (a, b) -> showList [ a; b ]
-      | ExpLimitList.L1 e -> showList [ e ]
-      | ExpLimitList.L0 -> showList []
+      | LX l -> show_hlist l
+      | L l -> show_hlist l
     in
     "(" ^ fexp ^ go es ^ ")"
 
   let define v vs e rest =
+    let rec show_hlist : type a. a VarHList.hlist -> string = function
+      | x :: xs -> " " ^ x ^ show_hlist xs
+      | [] -> ""
+    in
     let go : type a. a VarLimitList.limit -> string = function
-      | VarLimitList.LX (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
-      | VarLimitList.L6 (a, b, c, d, e, f) -> showList [ a; b; c; d; e; f ]
-      | VarLimitList.L5 (a, b, c, d, e) -> showList [ a; b; c; d; e ]
-      | VarLimitList.L4 (a, b, c, d) -> showList [ a; b; c; d ]
-      | VarLimitList.L3 (a, b, c) -> showList [ a; b; c ]
-      | VarLimitList.L2 (a, b) -> showList [ a; b ]
-      | VarLimitList.L1 e -> showList [ e ]
-      | VarLimitList.L0 -> showList []
+      | LX l -> show_hlist l
+      | L l -> show_hlist l
     in
     "(define (" ^ v ^ go vs ^ ")\n  " ^ e ^ ")\n" ^ rest
 
@@ -556,8 +520,8 @@ let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
   [%expect
     {|
     Ex1: (program
-    (define (tmp0 tmp2 tmp1)
-      (vector ((var tmp2) (vector-ref (var tmp1) 0)) ((var tmp2) (vector-ref (var tmp1) 1))))
+    (define (tmp0 tmp1 tmp2)
+      (vector ((var tmp1) (vector-ref (var tmp2) 0)) ((var tmp1) (vector-ref (var tmp2) 1))))
     (define (tmp3 tmp4)
       (+ (var tmp4) 1))
     (define (main)
@@ -571,12 +535,12 @@ let%expect_test "Example 2 RemoveLet, Shrink, and RevealFunctions" =
   [%expect
     {|
     Ex2: (program
-    (define (tmp1 tmp2)
-      (if (= (var tmp2) 0) t ((fun-ref tmp0) (+ (var tmp2) (- 1)))))
-    (define (tmp0 tmp3)
-      (if (= (var tmp3) 0) f ((fun-ref tmp1) (+ (var tmp3) (- 1)))))
+    (define (tmp0 tmp2)
+      (if (= (var tmp2) 0) t ((fun-ref tmp1) (+ (var tmp2) (- 1)))))
+    (define (tmp1 tmp3)
+      (if (= (var tmp3) 0) f ((fun-ref tmp0) (+ (var tmp3) (- 1)))))
     (define (main)
-      ((fun-ref tmp1) 24))
+      ((fun-ref tmp0) 24))
     )
     |}]
 
@@ -586,8 +550,8 @@ let%expect_test "Example 3 RemoveLet, Shrink, and RevealFunctions" =
   [%expect
     {|
     Ex3: (program
-    (define (tmp0 tmp7 tmp6 tmp5 tmp4 tmp3 tmp8)
-      (+ (+ (+ (+ (+ (+ (var tmp7) (var tmp6)) (var tmp5)) (var tmp4)) (var tmp3)) (vector-ref (var tmp8) 0)) (vector-ref (var tmp8) 1)))
+    (define (tmp0 tmp1 tmp2 tmp3 tmp4 tmp5 tmp8)
+      (+ (+ (+ (+ (+ (+ (var tmp1) (var tmp2)) (var tmp3)) (var tmp4)) (var tmp5)) (vector-ref (var tmp8) 0)) (vector-ref (var tmp8) 1)))
     (define (main)
       ((fun-ref tmp0) 1 2 3 4 5 (vector 6 7)))
     )
