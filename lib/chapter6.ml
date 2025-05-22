@@ -1,11 +1,39 @@
-module R4_Types = struct
-  include Chapter5.R3_Types
+module R3_Types = Chapter5.R3_Types
+module rec TyHList : (Chapter5.HLIST with type 'a el = 'a Ty.ty) =
+Chapter5.HListFn (struct
+  type 'a t = 'a Ty.ty
+end)
 
-  type typ =
-    [ Chapter5.R3_Types.typ
-    | `Fn of typ list * typ
-    ]
-  [@@deriving show]
+and Ty : sig
+  type 'a ty =
+    | Int : int ty
+    | Bool : bool ty
+    | Void : unit ty
+    | Vector : 'tup TyHList.hlist -> 'tup ty
+    | Fn : 'tup TyHList.hlist * 'a ty -> ('tup -> 'a) ty
+  val ( --> ) : 'a TyHList.hlist -> 'b ty -> ('a -> 'b) ty
+  val reflect : 'a ty -> R3_Types.typ
+end = struct
+  type _ ty =
+    | Int : int ty
+    | Bool : bool ty
+    | Void : unit ty
+    | Vector : 'tup TyHList.hlist -> 'tup ty
+    | Fn : 'tup TyHList.hlist * 'a ty -> ('tup -> 'a) ty
+
+  let ( --> ) a b = Fn (a, b)
+
+  let[@tail_mod_cons] rec list_of_types : type r.
+      r TyHList.hlist -> R3_Types.typ list = function
+    | x :: xs -> reflect x :: list_of_types xs
+    | [] -> []
+
+  and reflect : type a. a ty -> R3_Types.typ = function
+    | Int -> Int
+    | Bool -> Bool
+    | Void -> Void
+    | Vector tys -> Vector (list_of_types tys)
+    | Fn (params, ret) -> Fn (list_of_types params, reflect ret)
 end
 
 module type LIMIT = sig
@@ -94,7 +122,7 @@ module type R4_Let = sig
 
   module Wrapped : sig
     type ('r, 'a) t = {
-      realized : 'r UnitHList.hlist;
+      ty : ('r -> 'a) Ty.ty;
       fn : 'r VarHList.hlist -> 'a exp;
     }
   end
@@ -108,7 +136,7 @@ module type R4_Let = sig
 
   val ( $ ) : ('tup -> 'a) exp -> 'tup ExpHList.hlist -> 'a exp
   val ( @> ) :
-    'r UnitHList.hlist -> ('r VarHList.hlist -> 'a exp) -> ('r, 'a) Wrapped.t
+    ('r -> 'a) Ty.ty -> ('r VarHList.hlist -> 'a exp) -> ('r, 'a) Wrapped.t
   val ( let@ ) : ('tup, 'a) Wrapped.t -> (('tup -> 'a) var -> 'b def) -> 'b def
   val ( @@> ) :
     'r UnitHList.hlist ->
@@ -273,7 +301,7 @@ module TransformLetPass (F : R4) = struct
     end)
     module Wrapped = struct
       type ('r, 'a) t = {
-        realized : 'r UnitHList.hlist;
+        ty : ('r -> 'a) Ty.ty;
         fn : 'r F.VarHList.hlist -> 'a F'.exp;
       }
     end
@@ -286,7 +314,7 @@ module TransformLetPass (F : R4) = struct
         fn : 'r F.VarHList.hlist -> 'r FnHList.hlist;
       }
     end
-    let ( @> ) realized fn = Wrapped.{ realized; fn }
+    let ( @> ) ty fn = Wrapped.{ ty; fn }
     let ( @@> ) realized fn = Wrapped2.{ realized; fn }
 
     let ( $ ) f es r =
@@ -303,13 +331,14 @@ module TransformLetPass (F : R4) = struct
     let var v r = r.R.to_exp (F.string_of_var v)
 
     let let_helper var f g r =
-      let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
+      let rec go : type r. r TyHList.hlist -> r F.VarHList.hlist = function
         | _ :: xs ->
           let v = F.fresh () in
           v :: go xs
         | [] -> []
       in
-      let params = go f.Wrapped.realized in
+      let (Ty.Fn (params, _)) = f.Wrapped.ty in
+      let params = go params in
       let r' = R.{ to_exp = r.to_exp } in
       let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
         let tuple_var = F.fresh () in
@@ -459,14 +488,15 @@ module Ex1 (F : R4_Let) = struct
     observe @@ program
     @@
     let@ map_vec =
-      [ (); () ] @> fun [ f; v ] ->
+      Ty.([ [ Int ] --> Int; Vector [ Int; Int ] ] --> Vector [ Int; Int ])
+      @> fun [ f; v ] ->
       vector
         [
           var f $ [ vector_ref (var v) Here ];
           var f $ [ vector_ref (var v) (Next Here) ];
         ]
     in
-    let@ add1 = [ () ] @> fun [ x ] -> var x + int 1 in
+    let@ add1 = Ty.([ Int ] --> Int) @> fun [ x ] -> var x + int 1 in
     body
     @@ vector_ref
          (var map_vec $ [ var add1; vector [ int 0; int 41 ] ])
@@ -484,11 +514,11 @@ module Ex2 (F : R4_Let) = struct
       [ (); () ] @@> fun [ is_even; is_odd ] ->
       [
         begin
-          [ () ] @> fun [ v ] ->
+          Ty.([ Int ] --> Bool) @> fun [ v ] ->
           if_ (var v = int 0) t (var is_odd $ [ var v - int 1 ])
         end;
         begin
-          [ () ] @> fun [ v ] ->
+          Ty.([ Int ] --> Bool) @> fun [ v ] ->
           if_ (var v = int 0) f (var is_even $ [ var v - int 1 ])
         end;
       ]
@@ -502,7 +532,8 @@ module Ex3 (F : R4_Let) = struct
     observe @@ program
     @@
     let@ add =
-      [ (); (); (); (); (); (); () ] @> fun [ a; b; c; d; e; f; g ] ->
+      Ty.([ Int; Int; Int; Int; Int; Int; Int ] --> Int)
+      @> fun [ a; b; c; d; e; f; g ] ->
       var a + var b + var c + var d + var e + var f + var g
     in
     body (var add $ [ int 1; int 2; int 3; int 4; int 5; int 6; int 7 ])
