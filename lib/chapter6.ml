@@ -304,8 +304,8 @@ module F1_Collect_T
          and type 'a def = 'a X_def.from
          and type 'a program = 'a X_program.from) =
 struct
-  include F1_T (X_exp) (X_def) (X_program) (F)
   include Chapter5.R3_Collect_T (X_exp) (X_program) (R3_of_F1_Collect (F))
+  include F1_T (X_exp) (X_def) (X_program) (F)
 end
 
 module StringHashtbl = Hashtbl.Make (String)
@@ -548,6 +548,54 @@ module F1_Annotate_Types (F : F1) :
     let ty = StringMap.find label m in
     (ty, F.has_type (F.fun_ref label) ty)
 end
+module F1_Collect_Annotate_Types (F : F1_Collect) :
+  F1_Collect
+    with type 'a var = 'a F.var
+     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a def =
+      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  include Chapter5.R3_Collect_Annotate_Types (R3_of_F1_Collect (F))
+  include F1_Annotate_Types (F)
+end
+
+module ExposeAllocation (F : F1_Collect) : F1 with type 'a obs = 'a F.obs =
+struct
+  module M = Chapter5.ExposeAllocationPass (R3_of_F1_Collect (F))
+  module F' = F1_Collect_Annotate_Types (F)
+  include F'
+  include M.IDelta (R3_of_F1_Collect (F'))
+end
+
+module RemoveComplexPass (F : F1_Collect) = struct
+  include Chapter2_passes.RemoveComplexPass (R3_of_F1_Collect (F))
+  module X_def = Chapter1.MkId (struct
+    type 'a t = 'a F.def
+  end)
+  open X
+  module IDelta (F' : F1_Collect with type 'a exp = 'a X.term) = struct
+    let app e es =
+      let rec go : type r. r F'.ExpHList.hlist -> r F.ExpHList.hlist = function
+        | x :: xs -> bwd x :: go xs
+        | [] -> []
+      in
+      let go : type r. r F'.ExpLimitList.limit -> r F.ExpLimitList.limit =
+        function
+        | LX (l, l') -> LX (go l, go l')
+        | L l -> L (go l)
+      in
+      (Complex, F.app (bwd e) (go es))
+    let fun_ref label = (Complex, F.fun_ref label)
+  end
+end
+module RemoveComplex (F : F1_Collect) : F1_Collect with type 'a obs = 'a F.obs =
+struct
+  module M = RemoveComplexPass (F)
+  module F' = F1_Collect_T (M.X) (M.X_def) (M.X_program) (F)
+  include F'
+  include M.IDelta (F')
+end
 
 module R4_Shrink_Pretty () = struct
   include Chapter5.R3_Pretty ()
@@ -589,6 +637,11 @@ end
 module F1_Pretty () = struct
   include R4_Shrink_Pretty ()
   let fun_ref label = "(fun-ref " ^ label ^ ")"
+end
+
+module F1_Collect_Pretty () = struct
+  include Chapter5.R3_Collect_Pretty ()
+  include F1_Pretty ()
 end
 
 module Ex1 (F : R4_Let) = struct
@@ -719,5 +772,27 @@ let%expect_test "Example 3 Annotate Types" =
       (has-type (+ (has-type (+ (has-type (+ (has-type (+ (has-type (+ (has-type (+ (has-type (var tmp1) Int) (has-type (var tmp2) Int)) Int) (has-type (var tmp3) Int)) Int) (has-type (var tmp4) Int)) Int) (has-type (var tmp5) Int)) Int) (has-type (vector-ref (has-type (var tmp8) (Vector [Int; Int])) 0) Int)) Int) (has-type (vector-ref (has-type (var tmp8) (Vector [Int; Int])) 1) Int)) Int))
     (define (main)
       (has-type ((has-type (fun-ref tmp0) (Fn ([Int; Int; Int; Int; Int; (Vector [Int; Int])], Int))) (has-type 1 Int) (has-type 2 Int) (has-type 3 Int) (has-type 4 Int) (has-type 5 Int) (has-type (vector (has-type 6 Int) (has-type 7 Int)) (Vector [Int; Int]))) Int))
+    )
+    |}]
+
+let%expect_test "Example 1 ExposeAllocation & RemoveComplex" =
+  let module M =
+    Ex1
+      (TransformLet
+         (Shrink
+            (RevealFunctions
+               (ExposeAllocation
+                  (RemoveComplex
+                     (F1_Collect_Annotate_Types (F1_Collect_Pretty ()))))))) in
+  Format.printf "Ex1: %s" M.res;
+  [%expect
+    {|
+    Ex1: (program
+    (define (tmp0 tmp1 tmp2)
+      (has-type (let ([tmp12 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 24 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 24) Int)) Void)]) (has-type (let ([tmp9 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))]) (has-type (let ([tmp11 (has-type (vector-set! (has-type (var tmp9) (Vector [Int; Int])) 0 (has-type ((has-type (var tmp1) (Fn ([Int], Int))) (has-type (vector-ref (has-type (var tmp2) (Vector [Int; Int])) 0) Int)) Int)) Void)]) (has-type (let ([tmp10 (has-type (vector-set! (has-type (var tmp9) (Vector [Int; Int])) 1 (has-type ((has-type (var tmp1) (Fn ([Int], Int))) (has-type (vector-ref (has-type (var tmp2) (Vector [Int; Int])) 1) Int)) Int)) Void)]) (has-type (var tmp9) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int])))
+    (define (tmp3 tmp4)
+      (has-type (+ (has-type (var tmp4) Int) (has-type 1 Int)) Int))
+    (define (main)
+      (has-type (vector-ref (has-type ((has-type (fun-ref tmp0) (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int])))) (has-type (fun-ref tmp3) (Fn ([Int], Int))) (has-type (let ([tmp8 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 24 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 24) Int)) Void)]) (has-type (let ([tmp5 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))]) (has-type (let ([tmp7 (has-type (vector-set! (has-type (var tmp5) (Vector [Int; Int])) 0 (has-type 0 Int)) Void)]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp5) (Vector [Int; Int])) 1 (has-type 41 Int)) Void)]) (has-type (var tmp5) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int])) 1) Int))
     )
     |}]

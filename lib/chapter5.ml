@@ -354,53 +354,65 @@ struct
   include M.IDelta
 end
 
-module ExposeAllocation (F : R3_Collect) :
-  R3_Shrink with type 'a obs = 'a F.obs = struct
-  include R3_Collect_Annotate_Types (F)
+module ExposeAllocationPass (F : R3_Collect) = struct
+  module IDelta
+      (F' :
+        R3_Collect
+          with type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp) =
+  struct
+    open F'
+    let vector_helper hl m =
+      let rec go : type a.
+          a ExpHList.hlist -> R3_Types.typ list * a F.ExpHList.hlist = function
+        | e :: xs ->
+          let typ, e = e m in
+          let res_typs, res_es = go xs in
+          (typ :: res_typs, e :: res_es)
+        | [] -> ([], [])
+      in
+      go hl
 
-  let vector_helper hl m =
-    let rec go : type a.
-        a ExpHList.hlist -> R3_Types.typ list * a F.ExpHList.hlist = function
-      | e :: xs ->
-        let typ, e = e m in
-        let res_typs, res_es = go xs in
-        (typ :: res_typs, e :: res_es)
-      | [] -> ([], [])
-    in
-    go hl
-
-  let vector : type tup. tup ExpHList.hlist -> tup exp =
-   fun hl m ->
-    let vtys, ves = vector_helper hl m in
-    let ty = R3_Types.Vector vtys in
-    let ty_size = R3_Types.allocation_size ty in
-    let exp =
-      let alloc = fresh () in
-      lett (fresh ())
-        (if_
-           (global_value "free_ptr" + int ty_size < global_value "fromspace_end")
-           void (collect ty_size))
-      @@ lett alloc (allocate 1 ty)
-      @@
-      (* For every field set to the corresponding expression with vector_set *)
-      let rec go : type r a.
-          R3_Types.typ list -> r F.ExpHList.hlist -> (a, tup) ptr -> tup exp =
-       fun tys hl ptr ->
-        match (tys, hl) with
+    let vector : type tup. tup ExpHList.hlist -> tup exp =
+     fun hl m ->
+      let vtys, ves = vector_helper hl m in
+      let ty = R3_Types.Vector vtys in
+      let ty_size = R3_Types.allocation_size ty in
+      let exp =
+        let alloc = fresh () in
+        lett (fresh ())
+          (if_
+             (global_value "free_ptr" + int ty_size
+             < global_value "fromspace_end")
+             void (collect ty_size))
+        @@ lett alloc (allocate 1 ty)
+        @@
+        (* For every field set to the corresponding expression with vector_set *)
+        let rec go : type r a.
+            R3_Types.typ list -> r F.ExpHList.hlist -> (a, tup) ptr -> tup exp =
+         fun tys hl ptr ->
+          match (tys, hl) with
+          | ty :: tys, e :: es ->
+            let ptr = Obj.magic @@ Next ptr in
+            lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
+            @@ go tys es ptr
+          | _ -> var alloc
+        in
+        match (vtys, ves) with
         | ty :: tys, e :: es ->
-          let ptr = Obj.magic @@ Next ptr in
+          let ptr = Here in
           lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
           @@ go tys es ptr
         | _ -> var alloc
       in
-      match (vtys, ves) with
-      | ty :: tys, e :: es ->
-        let ptr = Here in
-        lett (fresh ()) (vector_set (var alloc) ptr (fun _ -> (ty, e)))
-        @@ go tys es ptr
-      | _ -> var alloc
-    in
-    exp m
+      exp m
+  end
+end
+module ExposeAllocation (F : R3_Collect) :
+  R3_Shrink with type 'a obs = 'a F.obs = struct
+  module M = ExposeAllocationPass (F)
+  module F' = R3_Collect_Annotate_Types (F)
+  include F'
+  include M.IDelta (F')
 end
 
 module type C2 = sig
