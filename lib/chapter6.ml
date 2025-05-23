@@ -308,6 +308,18 @@ struct
   include F1_T (X_exp) (X_def) (X_program) (F)
 end
 
+module type C3 = sig
+  include Chapter5.C2
+  module ArgHList : Chapter5.HLIST with type 'a el = 'a arg
+  module ArgLimitList : LIMIT with module HList = ArgHList
+  val fun_ref : string -> 'a exp
+  val call : ('tup -> 'a) arg -> 'tup ArgLimitList.limit -> 'a exp
+  val tailcall : ('tup -> 'a) arg -> 'tup ArgLimitList.limit -> 'a tail
+  type 'a def
+  val define : label -> var list -> (label * unit tail) list -> unit def
+  val program : ?locals:string list -> unit def list -> unit program
+end
+
 module StringHashtbl = Hashtbl.Make (String)
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
@@ -501,10 +513,7 @@ module R4_Annotate_Types (F : R4_Shrink) :
     let m = StringMap.add (F.string_of_var v) (Ty.reflect ty) m in
     let m, rest = rest m in
     let rec add_param_types : type r.
-        r VarHList.hlist ->
-        r Ty.TyLimitList.HList.hlist ->
-        R3_Types.typ StringMap.t ->
-        R3_Types.typ StringMap.t =
+        r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> 'a -> 'a =
      fun vars tys map ->
       match (vars, tys) with
       | v :: vs, t :: ts ->
@@ -512,18 +521,14 @@ module R4_Annotate_Types (F : R4_Shrink) :
           (StringMap.add (F.string_of_var v) (Ty.reflect t) map)
       | [], [] -> map
     in
-    let go : type r.
-        r VarLimitList.limit ->
-        r Ty.TyLimitList.limit ->
-        R3_Types.typ StringMap.t ->
-        R3_Types.typ StringMap.t =
-     fun vars tys map ->
+    let add_param_types (type r) (vars : r VarLimitList.limit)
+        (tys : r Ty.TyLimitList.limit) map =
       match (vars, tys) with
       | LX (vs, _), LX (ts, _) -> add_param_types vs ts map
       | L vs, L ts -> add_param_types vs ts map
       | _, _ -> failwith "This can never happen"
     in
-    let m' = go vs params m in
+    let m' = add_param_types vs params m in
     let _, body = body m' in
     (m, F.define ty v vs body rest)
 
