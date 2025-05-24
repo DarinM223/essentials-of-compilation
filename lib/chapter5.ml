@@ -529,30 +529,14 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   let vector _ _ _ =
     failwith "vector should have been eliminated before explicate control"
   let vector_ref e ptr m r =
-    let tmp = F.(string_of_var (fresh ())) in
-    e ann_id
-      (Assign
-         ( tmp,
-           fun () ->
-             convert_exp C2.(vector_ref (var (lookup tmp)) (ptr_num ptr)) m r ))
+    let& tmp = e in
+    convert_exp C2.(vector_ref (var (lookup tmp)) (ptr_num ptr)) m r
   let vector_set e ptr v m r =
-    let tmp1 = F.(string_of_var (fresh ())) in
-    let tmp2 = F.(string_of_var (fresh ())) in
-    e ann_id
-      (Assign
-         ( tmp1,
-           fun () ->
-             v ann_id
-               (Assign
-                  ( tmp2,
-                    fun () ->
-                      convert_exp
-                        C2.(
-                          vector_set
-                            (var (lookup tmp1))
-                            (ptr_num ptr)
-                            (var (lookup tmp2)))
-                        m r )) ))
+    let& tmp1 = e in
+    let& tmp2 = v in
+    convert_exp
+      C2.(vector_set (var (lookup tmp1)) (ptr_num ptr) (var (lookup tmp2)))
+      m r
 
   let collect i _ = function
     | Tail -> C2.(collect i @> return void)
@@ -1003,7 +987,7 @@ let%expect_test "Ex1 explicate control" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) Int)) (seq (assign tmp9 (has-type 24 Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp19 tmp20) Bool) block_t3 block_f4))))))
+    Ex1: (program ((locals . ())) ((start . (seq (assign tmp8 (has-type (global-value free_ptr) Int)) (seq (assign tmp9 (has-type 24 Int)) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp22 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp19 tmp22) Bool) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
     (block_f2 . (seq (collect 24) (goto block_body0)))
     (block_body0 . (seq (assign tmp4 (has-type (allocate 1 (Vector [Int; Bool])) (Vector [Int; Bool]))) (seq (assign tmp11 (has-type 1 Int)) (seq (assign tmp6 (has-type (vector-set! tmp4 0 tmp11) Void)) (seq (assign tmp13 (has-type t Bool)) (seq (assign tmp5 (has-type (vector-set! tmp4 1 tmp13) Void)) (seq (assign tmp15 (has-type 42 Int)) (seq (assign tmp2 (has-type (vector-set! tmp4 0 tmp15) Void)) (seq (assign tmp17 (has-type f Bool)) (seq (assign tmp3 (has-type (vector-set! tmp4 1 tmp17) Void)) (return (has-type (vector-ref tmp4 0) Int))))))))))))
@@ -1025,7 +1009,7 @@ let%expect_test "Ex1 uncover locals" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program ((locals . ((tmp2 . Void) (tmp3 . Void) (tmp4 . (Vector [Int; Bool])) (tmp5 . Void) (tmp6 . Void) (tmp7 . Void) (tmp8 . Int) (tmp9 . Int) (tmp11 . Int) (tmp13 . Bool) (tmp15 . Int) (tmp17 . Bool) (tmp20 . Int)))) ((start . (seq (assign tmp8 (global-value free_ptr)) (seq (assign tmp9 24) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp20 (global-value fromspace_end)) (if (< tmp19 tmp20) block_t3 block_f4))))))
+    Ex1: (program ((locals . ((tmp2 . Void) (tmp3 . Void) (tmp4 . (Vector [Int; Bool])) (tmp5 . Void) (tmp6 . Void) (tmp7 . Void) (tmp8 . Int) (tmp9 . Int) (tmp11 . Int) (tmp13 . Bool) (tmp15 . Int) (tmp17 . Bool) (tmp22 . Int)))) ((start . (seq (assign tmp8 (global-value free_ptr)) (seq (assign tmp9 24) (seq (assign tmp19 (+ tmp8 tmp9)) (seq (assign tmp22 (global-value fromspace_end)) (if (< tmp19 tmp22) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
     (block_f2 . (seq (collect 24) (goto block_body0)))
     (block_body0 . (seq (assign tmp4 (allocate 1 (Vector [Int; Bool]))) (seq (assign tmp11 1) (seq (assign tmp6 (vector-set! tmp4 0 tmp11)) (seq (assign tmp13 t) (seq (assign tmp5 (vector-set! tmp4 1 tmp13)) (seq (assign tmp15 42) (seq (assign tmp2 (vector-set! tmp4 0 tmp15)) (seq (assign tmp17 f) (seq (assign tmp3 (vector-set! tmp4 1 tmp17)) (return (vector-ref tmp4 0))))))))))))

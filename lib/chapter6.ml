@@ -317,7 +317,13 @@ module type C3 = sig
   val tailcall : ('tup -> 'a) arg -> 'tup ArgLimitList.limit -> 'a tail
   type 'a def
   val define : label -> var list -> (label * unit tail) list -> unit def
-  val program : ?locals:string list -> unit def list -> unit program
+  val program :
+    ?locals:(var * R3_Types.typ) list -> unit def list -> unit program
+end
+
+module C2_of_C3 (F : C3) : Chapter5.C2 = struct
+  include F
+  let program ?locals blocks = F.program ?locals [ F.define "main" [] blocks ]
 end
 
 module StringHashtbl = Hashtbl.Make (String)
@@ -600,6 +606,20 @@ struct
   module F' = F1_Collect_T (M.X) (M.X_def) (M.X_program) (F)
   include F'
   include M.IDelta (F')
+end
+
+module ExplicateControl (F : F1_Collect) (C3 : C3) () : F1_Collect = struct
+  include Chapter5.ExplicateControl (R3_of_F1_Collect (F)) (C2_of_C3 (C3)) ()
+  module VarHList = F.VarHList
+  module VarLimitList = F.VarLimitList
+  module ExpLimitList = LimitFn (ExpHList)
+  type 'a def = unit -> unit C3.def
+  let app _e _es _m _r = failwith ""
+  let define _ty _v _vs _body _rest () = failwith ""
+  let body _ty _e () = failwith ""
+  let endd () () = failwith ""
+  let program _def () = failwith ""
+  let fun_ref _label _m _r = failwith ""
 end
 
 module R4_Shrink_Pretty () = struct

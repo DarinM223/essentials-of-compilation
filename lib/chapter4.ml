@@ -378,37 +378,16 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
   let not e m = function
     | Pred (t, f) -> e ann_id (Pred (f, t))
     | ctx ->
-      let tmp = F.(string_of_var (fresh ())) in
-      e ann_id
-        (Assign (tmp, fun () -> convert_cond C1.(not (var (lookup tmp))) m ctx))
+      let& tmp = e in
+      convert_cond C1.(not (var (lookup tmp))) m ctx
   let ( = ) a b m r =
-    let tmp1 = F.(string_of_var (fresh ())) in
-    let tmp2 = F.(string_of_var (fresh ())) in
-    a ann_id
-      (Assign
-         ( tmp1,
-           fun () ->
-             b ann_id
-               (Assign
-                  ( tmp2,
-                    fun () ->
-                      convert_cond
-                        C1.(var (lookup tmp1) = var (lookup tmp2))
-                        m r )) ))
+    let& tmp1 = a in
+    let& tmp2 = b in
+    convert_cond C1.(var (lookup tmp1) = var (lookup tmp2)) m r
   let ( < ) a b m r =
-    let tmp1 = F.(string_of_var (fresh ())) in
-    let tmp2 = F.(string_of_var (fresh ())) in
-    a ann_id
-      (Assign
-         ( tmp1,
-           fun () ->
-             b ann_id
-               (Assign
-                  ( tmp2,
-                    fun () ->
-                      convert_cond
-                        C1.(var (lookup tmp1) < var (lookup tmp2))
-                        m r )) ))
+    let& tmp1 = a in
+    let& tmp2 = b in
+    convert_cond C1.(var (lookup tmp1) < var (lookup tmp2)) m r
 
   let if_ cond t_branch f_branch m = function
     | Tail ->

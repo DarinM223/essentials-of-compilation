@@ -68,6 +68,10 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
   let table : (string, string) Hashtbl.t = Hashtbl.create 100
   let rec lookup v = try lookup (Hashtbl.find table v) with Not_found -> v
 
+  let ( let& ) e f =
+    let tmp = F.(string_of_var (fresh ())) in
+    e ann_id (Assign (tmp, fun () -> f tmp))
+
   let string_of_var = F.string_of_var
   let fresh = F.fresh
   let var_of_string = F.var_of_string
@@ -81,23 +85,13 @@ module ExplicateControl (F : R1) (C0 : C0) () = struct
 
   let read () = convert_exp C0.(read ())
   let neg e m r =
-    let tmp = F.(string_of_var (fresh ())) in
-    e ann_id
-      (Assign (tmp, fun () -> convert_exp C0.(neg (var (lookup tmp))) m r))
+    let& tmp = e in
+    convert_exp C0.(neg (var (lookup tmp))) m r
 
   let ( + ) e1 e2 m r =
-    let tmp1 = F.(string_of_var (fresh ())) in
-    let tmp2 = F.(string_of_var (fresh ())) in
-    e1 ann_id
-      (Assign
-         ( tmp1,
-           fun () ->
-             e2 ann_id
-               (Assign
-                  ( tmp2,
-                    fun () ->
-                      convert_exp C0.(var (lookup tmp1) + var (lookup tmp2)) m r
-                  )) ))
+    let& tmp1 = e1 in
+    let& tmp2 = e2 in
+    convert_exp C0.(var (lookup tmp1) + var (lookup tmp2)) m r
 
   let var v m r =
     let v = lookup (F.string_of_var v) in
