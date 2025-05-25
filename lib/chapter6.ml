@@ -608,12 +608,12 @@ struct
   include M.IDelta (F')
 end
 
-module ExplicateControl (F : F1_Collect) (C3 : C3) () : F1_Collect = struct
+module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
   include Chapter5.ExplicateControl (R3_of_F1_Collect (F)) (C2_of_C3 (C3)) ()
   module VarHList = F.VarHList
-  module VarLimitList = F.VarLimitList
+  module VarLimitList = LimitFn (VarHList)
   module ExpLimitList = LimitFn (ExpHList)
-  type 'a def = unit -> unit C3.def
+  type 'a def = unit -> unit C3.def list
 
   let rec vars_of_exps : type r. r ExpHList.hlist -> r VarHList.hlist = function
     | _ :: xs ->
@@ -655,11 +655,25 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () : F1_Collect = struct
       | _ -> failwith "app: ExpLimitList and VarLimitList are different sizes"
     in
     go (es, vs)
-  let define _ty _v _vs _body _rest () = failwith ""
-  let body _ty _e () = failwith ""
-  let endd () () = failwith ""
-  let program _def () = failwith ""
-  let fun_ref _label _m _r = failwith ""
+  let define _ty v vs body rest () =
+    Hashtbl.clear block_map;
+    let start_body = body ann_id Tail in
+    let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
+    let blocks = ("start", start_body) :: blocks in
+    let rec go : type r. r VarHList.hlist -> string list = function
+      | x :: xs -> F.string_of_var x :: go xs
+      | [] -> []
+    in
+    let go : type r. r VarLimitList.limit -> string list = function
+      | LX (l, _) -> go l
+      | L l -> go l
+    in
+    C3.define (F.string_of_var v) (go vs) blocks :: rest ()
+  let body _ _ () =
+    failwith "ExplicateControl: body should have been eliminated"
+  let endd () () = []
+  let program def () = C3.program (def ())
+  let fun_ref label = convert_exp (C3.fun_ref label)
 end
 
 module R4_Shrink_Pretty () = struct
@@ -707,6 +721,32 @@ end
 module F1_Collect_Pretty () = struct
   include Chapter5.R3_Collect_Pretty ()
   include F1_Pretty ()
+end
+
+module C3_Pretty = struct
+  include Chapter5.C2_Pretty
+  type 'a def = string
+  module ArgHList = Chapter5.HListFn (struct
+    type 'a t = 'a arg
+  end)
+  module ArgLimitList = LimitFn (ArgHList)
+  let rec show_args : type r. r ArgHList.hlist -> string = function
+    | x :: xs -> " " ^ x ^ show_args xs
+    | [] -> ""
+  let show_args_limit : type r. r ArgLimitList.limit -> string = function
+    | LX (l, _) -> show_args l
+    | L l -> show_args l
+
+  let fun_ref label = "(fun-ref " ^ label ^ ")"
+  let call f ps = "(call " ^ f ^ show_args_limit ps ^ ")"
+  let tailcall f ps = "(tailcall " ^ f ^ " " ^ show_args_limit ps ^ ")"
+  let define v vs body =
+    let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
+    let body = String.concat "\n" (List.map pair body) in
+    "(define " ^ v ^ " " ^ String.concat " " vs ^ " " ^ body ^ ")"
+  let program ?(locals = []) defs =
+    "(program ((locals . " ^ info locals ^ "))\n" ^ String.concat "\n" defs
+    ^ ")"
 end
 
 module Ex1 (F : R4_Let) = struct
@@ -860,4 +900,33 @@ let%expect_test "Example 1 ExposeAllocation & RemoveComplex" =
     (define (main)
       (has-type (vector-ref (has-type ((has-type (fun-ref tmp0) (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int])))) (has-type (fun-ref tmp3) (Fn ([Int], Int))) (has-type (let ([tmp8 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 24 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 24) Int)) Void)]) (has-type (let ([tmp5 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))]) (has-type (let ([tmp7 (has-type (vector-set! (has-type (var tmp5) (Vector [Int; Int])) 0 (has-type 0 Int)) Void)]) (has-type (let ([tmp6 (has-type (vector-set! (has-type (var tmp5) (Vector [Int; Int])) 1 (has-type 41 Int)) Void)]) (has-type (var tmp5) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int]))) (Vector [Int; Int])) 1) Int))
     )
+    |}]
+
+let%expect_test "Example 1 ExplicateControl" =
+  let module M =
+    Ex1
+      (TransformLet
+         (Shrink
+            (RevealFunctions
+               (ExposeAllocation
+                  (RemoveComplex
+                     (F1_Collect_Annotate_Types
+                        (ExplicateControl (F1_Collect_Pretty ()) (C3_Pretty) ()))))))) in
+  Format.printf "Ex1: %s" M.res;
+  [%expect
+    {|
+    Ex1: (program ((locals . ()))
+    (define tmp0 tmp1 tmp2 (start . (seq (assign tmp24 (has-type (global-value free_ptr) Int)) (seq (assign tmp25 (has-type 24 Int)) (seq (assign tmp23 (has-type (+ tmp24 tmp25) Int)) (seq (assign tmp26 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp23 tmp26) Bool) block_t3 block_f4))))))
+    (block_t3 . (goto block_t1))
+    (block_f2 . (seq (collect 24) (goto block_body0)))
+    (block_body0 . (seq (assign tmp9 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))) (seq (assign tmp16 (has-type (vector-ref tmp2 0) Int)) (seq (assign tmp14 (has-type (call tmp15 tmp16) Int)) (seq (assign tmp11 (has-type (vector-set! tmp9 0 tmp14) Void)) (seq (assign tmp21 (has-type (vector-ref tmp2 1) Int)) (seq (assign tmp19 (has-type (call tmp20 tmp21) Int)) (seq (assign tmp10 (has-type (vector-set! tmp9 1 tmp19) Void)) (return (has-type tmp9 (Vector [Int; Int])))))))))))
+    (block_t1 . (seq (assign tmp12 (has-type (void) Void)) (goto block_body0)))
+    (block_f4 . (goto block_f2)))
+    (define tmp3 tmp4 (start . (seq (assign tmp28 (has-type 1 Int)) (return (has-type (+ tmp4 tmp28) Int)))))
+    (define main  (start . (seq (assign tmp30 (has-type (fun-ref tmp0) (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int]))))) (seq (assign tmp31 (has-type (fun-ref tmp3) (Fn ([Int], Int)))) (seq (assign tmp38 (has-type (global-value free_ptr) Int)) (seq (assign tmp39 (has-type 24 Int)) (seq (assign tmp37 (has-type (+ tmp38 tmp39) Int)) (seq (assign tmp40 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp37 tmp40) Bool) block_t8 block_f9))))))))
+    (block_body5 . (seq (assign tmp5 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))) (seq (assign tmp34 (has-type 0 Int)) (seq (assign tmp7 (has-type (vector-set! tmp5 0 tmp34) Void)) (seq (assign tmp36 (has-type 41 Int)) (seq (assign tmp6 (has-type (vector-set! tmp5 1 tmp36) Void)) (seq (assign tmp29 (has-type (call tmp30 tmp31 tmp32) (Vector [Int; Int]))) (return (has-type (vector-ref tmp29 1) Int)))))))))
+    (block_f9 . (goto block_f7))
+    (block_t6 . (seq (assign tmp8 (has-type (void) Void)) (goto block_body5)))
+    (block_f7 . (seq (collect 24) (goto block_body5)))
+    (block_t8 . (goto block_t6))))
     |}]
