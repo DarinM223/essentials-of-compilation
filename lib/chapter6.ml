@@ -321,7 +321,7 @@ module type C3 = sig
     ?locals:(var * R3_Types.typ) list -> unit def list -> unit program
 end
 
-module C2_of_C3 (F : C3) : Chapter5.C2 = struct
+module C2_of_C3 (F : C3) = struct
   include F
   let program ?locals blocks = F.program ?locals [ F.define "main" [] blocks ]
 end
@@ -614,7 +614,47 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () : F1_Collect = struct
   module VarLimitList = F.VarLimitList
   module ExpLimitList = LimitFn (ExpHList)
   type 'a def = unit -> unit C3.def
-  let app _e _es _m _r = failwith ""
+
+  let rec vars_of_exps : type r. r ExpHList.hlist -> r VarHList.hlist = function
+    | _ :: xs ->
+      let var = F.fresh () in
+      var :: vars_of_exps xs
+    | [] -> []
+  let vars_of_exps_limit : type r. r ExpLimitList.limit -> r VarLimitList.limit
+      = function
+    | LX (l, l') -> LX (vars_of_exps l, vars_of_exps l')
+    | L l -> L (vars_of_exps l)
+
+  let rec args_of_vars : type r. r VarHList.hlist -> r C3.ArgHList.hlist =
+    function
+    | x :: xs -> C3.var (F.string_of_var x) :: args_of_vars xs
+    | [] -> []
+  let args_of_vars_limit : type r.
+      r VarLimitList.limit -> r C3.ArgLimitList.limit = function
+    | LX (l, l') -> LX (args_of_vars l, args_of_vars l')
+    | L l -> L (args_of_vars l)
+
+  let app e es m r =
+    let& e = e in
+    let vs = vars_of_exps_limit es in
+    let rec go : type r. r ExpHList.hlist * r VarHList.hlist -> unit C3.tail =
+      function
+      | e :: es, v :: vs ->
+        e ann_id (Assign (F.string_of_var v, fun () -> go (es, vs)))
+      | [], [] ->
+        let args = args_of_vars_limit vs in
+        (match r with
+        | Tail -> C3.(tailcall (var e) args)
+        | Assign (v, body) -> C3.(assign v (m.f (call (var e) args)) @> body ())
+        | Pred _ -> failwith "Call should not be in an if expression")
+    in
+    let go : type r. r ExpLimitList.limit * r VarLimitList.limit -> unit C3.tail
+        = function
+      | LX (es, _), LX (vs, _) -> go (es, vs)
+      | L es, L vs -> go (es, vs)
+      | _ -> failwith "app: ExpLimitList and VarLimitList are different sizes"
+    in
+    go (es, vs)
   let define _ty _v _vs _body _rest () = failwith ""
   let body _ty _e () = failwith ""
   let endd () () = failwith ""
