@@ -1,3 +1,8 @@
+module StringMap = Map.Make (String)
+module StringHashtbl = Hashtbl.Make (String)
+module ArgSet = Chapter2_definitions.ArgSet
+module ArgMap = Chapter2_definitions.ArgMap
+
 module type LIMIT = sig
   module HList : Chapter5.HLIST
   open HList
@@ -366,7 +371,35 @@ module C3_R_T (R : Chapter1.Reader) (F : C3) = struct
     F.program defs
 end
 
-module StringHashtbl = Hashtbl.Make (String)
+module type X86_3 = sig
+  include Chapter5.X86_2
+  val fun_ref : string -> 'a arg
+  val indirect_callq : 'a arg -> unit instr
+  val tail_jmp : 'a arg -> unit instr
+  val leaq : 'a arg -> 'b arg -> unit instr
+  type 'a def
+  val define :
+    ?locals:R3_Types.typ StringMap.t ->
+    ?stack_size:int ->
+    ?root_stack_size:int ->
+    ?conflicts:ArgSet.t ArgMap.t ->
+    ?moves:ArgSet.t ArgMap.t ->
+    label ->
+    (label * unit block) list ->
+    unit def
+  val program : unit def list -> unit program
+end
+
+module X86_2_of_X86_3 (F : X86_3) = struct
+  include F
+  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks =
+    F.program
+      [
+        F.define ?locals ?stack_size ?root_stack_size ?conflicts ?moves "main"
+          blocks;
+      ]
+end
+
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
   module R = struct
@@ -521,7 +554,6 @@ module RevealFunctions (F : F1) : R4_Shrink with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module StringMap = Map.Make (String)
 module R4_Annotate_Types (F : R4_Shrink) :
   R4_Shrink
     with type 'a var = 'a F.var
@@ -738,6 +770,23 @@ module UncoverLocals (F : C3) : C3 with type 'a obs = 'a F.obs = struct
   module M = UncoverLocalsPass (F)
   include C3_R_T (M.R) (F)
   include M.IDelta
+end
+
+module SelectInstructions (F : C3) (X86 : X86_3) :
+  C3 with type 'a obs = unit X86.obs = struct
+  include Chapter5.SelectInstructions (C2_of_C3 (F)) (X86_2_of_X86_3 (X86))
+  module ArgHList = Chapter5.HListFn (struct
+    type 'a t = 'a arg
+  end)
+  module ArgLimitList = LimitFn (ArgHList)
+  type 'a def = unit X86.def
+
+  (* TODO: (assign a (fun-ref b)) -> (leaq (fun-ref b) a) *)
+  let fun_ref _label = failwith ""
+  let call _f _ps = failwith ""
+  let tailcall _f _ps = failwith ""
+  let define ?locals:_ _v _vs _body = failwith ""
+  let program _defs = failwith ""
 end
 
 module R4_Shrink_Pretty () = struct

@@ -581,8 +581,7 @@ module UncoverLocals (F : C2) : C2 with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module SelectInstructions (F : C2) (X86 : X86_2) :
-  C2 with type 'a obs = unit X86.obs = struct
+module SelectInstructions (F : C2) (X86 : X86_2) = struct
   module C1 = C1_of_C2 (F)
   include Chapter4.SelectInstructions (C1) (X86_1_of_X86_2 (X86))
   let has_type e _ ctx = e ctx
