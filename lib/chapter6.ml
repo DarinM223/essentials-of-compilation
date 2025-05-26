@@ -316,14 +316,54 @@ module type C3 = sig
   val call : ('tup -> 'a) arg -> 'tup ArgLimitList.limit -> 'a exp
   val tailcall : ('tup -> 'a) arg -> 'tup ArgLimitList.limit -> 'a tail
   type 'a def
-  val define : label -> var list -> (label * unit tail) list -> unit def
-  val program :
-    ?locals:(var * R3_Types.typ) list -> unit def list -> unit program
+  val define :
+    ?locals:(var * R3_Types.typ) list ->
+    label ->
+    var list ->
+    (label * unit tail) list ->
+    unit def
+  val program : unit def list -> unit program
 end
 
 module C2_of_C3 (F : C3) = struct
   include F
-  let program ?locals blocks = F.program ?locals [ F.define "main" [] blocks ]
+  let program ?locals blocks = F.program [ F.define ?locals "main" [] blocks ]
+end
+
+module C3_R_T (R : Chapter1.Reader) (F : C3) = struct
+  include Chapter5.C2_R_T (R) (C2_of_C3 (F))
+  type 'a def = unit -> 'a F.def
+  module ArgHList = Chapter5.HListFn (struct
+    type 'a t = 'a arg
+  end)
+  module ArgLimitList = LimitFn (ArgHList)
+  let rec pass_args : type r. 'a -> r ArgHList.hlist -> r F.ArgHList.hlist =
+   fun r -> function
+    | x :: xs ->
+      let x = x r in
+      x :: pass_args r xs
+    | [] -> []
+  let pass_args_limit : type r.
+      'a -> r ArgLimitList.limit -> r F.ArgLimitList.limit =
+   fun r -> function
+    | LX (l, l') -> LX (pass_args r l, pass_args r l')
+    | L l -> L (pass_args r l)
+  let fun_ref label _ = F.fun_ref label
+  let call f ps r =
+    let f = f r in
+    let ps = pass_args_limit r ps in
+    F.call f ps
+  let tailcall f ps r =
+    let f = f r in
+    let ps = pass_args_limit r ps in
+    F.tailcall f ps
+  let define ?locals v vs body () =
+    let init = R.init () in
+    let body = List.map (fun (l, t) -> (l, t init)) body in
+    F.define ?locals v vs body
+  let program defs () =
+    let defs = List.map (fun def -> def ()) defs in
+    F.program defs
 end
 
 module StringHashtbl = Hashtbl.Make (String)
@@ -659,7 +699,8 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
     Hashtbl.clear block_map;
     let start_body = body ann_id Tail in
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
-    let blocks = ("start", start_body) :: blocks in
+    let start_block = fresh_block "start" in
+    let blocks = (start_block, start_body) :: blocks in
     let rec go : type r. r VarHList.hlist -> string list = function
       | x :: xs -> F.string_of_var x :: go xs
       | [] -> []
@@ -674,6 +715,29 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
   let endd () () = []
   let program def () = C3.program (def ())
   let fun_ref label = convert_exp (C3.fun_ref label)
+end
+
+module UncoverLocalsPass (F : C3) = struct
+  include Chapter5.UncoverLocalsPass (C2_of_C3 (F))
+  module IDelta = struct
+    include IDelta
+    let define ?locals:_ v vs body () =
+      let ((_, table) as init) = R.init () in
+      let body = List.map (fun (l, t) -> (l, t init)) body in
+      let locals =
+        StringHashtbl.to_seq table |> List.of_seq |> List.sort R.compare
+      in
+      F.define ~locals v vs body
+
+    let program defs () =
+      let defs = List.map (fun def -> def ()) defs in
+      F.program defs
+  end
+end
+module UncoverLocals (F : C3) : C3 with type 'a obs = 'a F.obs = struct
+  module M = UncoverLocalsPass (F)
+  include C3_R_T (M.R) (F)
+  include M.IDelta
 end
 
 module R4_Shrink_Pretty () = struct
@@ -739,14 +803,13 @@ module C3_Pretty = struct
 
   let fun_ref label = "(fun-ref " ^ label ^ ")"
   let call f ps = "(call " ^ f ^ show_args_limit ps ^ ")"
-  let tailcall f ps = "(tailcall " ^ f ^ " " ^ show_args_limit ps ^ ")"
-  let define v vs body =
+  let tailcall f ps = "(tailcall " ^ f ^ show_args_limit ps ^ ")"
+  let define ?(locals = []) v vs body =
     let pair (label, tail) = "(" ^ label ^ " . " ^ tail ^ ")" in
     let body = String.concat "\n" (List.map pair body) in
-    "(define " ^ v ^ " " ^ String.concat " " vs ^ " " ^ body ^ ")"
-  let program ?(locals = []) defs =
-    "(program ((locals . " ^ info locals ^ "))\n" ^ String.concat "\n" defs
-    ^ ")"
+    "(define ((locals . " ^ info locals ^ ")) " ^ v ^ " " ^ String.concat " " vs
+    ^ " " ^ body ^ ")"
+  let program defs = "(program \n" ^ String.concat "\n" defs ^ ")"
 end
 
 module Ex1 (F : R4_Let) = struct
@@ -902,7 +965,7 @@ let%expect_test "Example 1 ExposeAllocation & RemoveComplex" =
     )
     |}]
 
-let%expect_test "Example 1 ExplicateControl" =
+let%expect_test "Example 1 ExplicateControl & UncoverLocals" =
   let module M =
     Ex1
       (TransformLet
@@ -911,22 +974,25 @@ let%expect_test "Example 1 ExplicateControl" =
                (ExposeAllocation
                   (RemoveComplex
                      (F1_Collect_Annotate_Types
-                        (ExplicateControl (F1_Collect_Pretty ()) (C3_Pretty) ()))))))) in
+                        (ExplicateControl
+                           (F1_Collect_Pretty ())
+                           (UncoverLocals (C3_Pretty))
+                           ()))))))) in
   Format.printf "Ex1: %s" M.res;
   [%expect
     {|
-    Ex1: (program ((locals . ()))
-    (define tmp0 tmp1 tmp2 (start . (seq (assign tmp24 (has-type (global-value free_ptr) Int)) (seq (assign tmp25 (has-type 24 Int)) (seq (assign tmp23 (has-type (+ tmp24 tmp25) Int)) (seq (assign tmp26 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp23 tmp26) Bool) block_t3 block_f4))))))
+    Ex1: (program
+    (define ((locals . ((tmp9 . (Vector [Int; Int])) (tmp10 . Void) (tmp11 . Void) (tmp12 . Void) (tmp14 . Int) (tmp16 . Int) (tmp19 . Int) (tmp21 . Int) (tmp23 . Int) (tmp24 . Int) (tmp25 . Int) (tmp26 . Int)))) tmp0 tmp1 tmp2 (start5 . (seq (assign tmp24 (global-value free_ptr)) (seq (assign tmp25 24) (seq (assign tmp23 (+ tmp24 tmp25)) (seq (assign tmp26 (global-value fromspace_end)) (if (< tmp23 tmp26) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
     (block_f2 . (seq (collect 24) (goto block_body0)))
-    (block_body0 . (seq (assign tmp9 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))) (seq (assign tmp16 (has-type (vector-ref tmp2 0) Int)) (seq (assign tmp14 (has-type (call tmp15 tmp16) Int)) (seq (assign tmp11 (has-type (vector-set! tmp9 0 tmp14) Void)) (seq (assign tmp21 (has-type (vector-ref tmp2 1) Int)) (seq (assign tmp19 (has-type (call tmp20 tmp21) Int)) (seq (assign tmp10 (has-type (vector-set! tmp9 1 tmp19) Void)) (return (has-type tmp9 (Vector [Int; Int])))))))))))
-    (block_t1 . (seq (assign tmp12 (has-type (void) Void)) (goto block_body0)))
+    (block_body0 . (seq (assign tmp9 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp16 (vector-ref tmp2 0)) (seq (assign tmp14 (call tmp15 tmp16)) (seq (assign tmp11 (vector-set! tmp9 0 tmp14)) (seq (assign tmp21 (vector-ref tmp2 1)) (seq (assign tmp19 (call tmp20 tmp21)) (seq (assign tmp10 (vector-set! tmp9 1 tmp19)) (return tmp9)))))))))
+    (block_t1 . (seq (assign tmp12 (void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))
-    (define tmp3 tmp4 (start . (seq (assign tmp28 (has-type 1 Int)) (return (has-type (+ tmp4 tmp28) Int)))))
-    (define main  (start . (seq (assign tmp30 (has-type (fun-ref tmp0) (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int]))))) (seq (assign tmp31 (has-type (fun-ref tmp3) (Fn ([Int], Int)))) (seq (assign tmp38 (has-type (global-value free_ptr) Int)) (seq (assign tmp39 (has-type 24 Int)) (seq (assign tmp37 (has-type (+ tmp38 tmp39) Int)) (seq (assign tmp40 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp37 tmp40) Bool) block_t8 block_f9))))))))
-    (block_body5 . (seq (assign tmp5 (has-type (allocate 1 (Vector [Int; Int])) (Vector [Int; Int]))) (seq (assign tmp34 (has-type 0 Int)) (seq (assign tmp7 (has-type (vector-set! tmp5 0 tmp34) Void)) (seq (assign tmp36 (has-type 41 Int)) (seq (assign tmp6 (has-type (vector-set! tmp5 1 tmp36) Void)) (seq (assign tmp29 (has-type (call tmp30 tmp31 tmp32) (Vector [Int; Int]))) (return (has-type (vector-ref tmp29 1) Int)))))))))
-    (block_f9 . (goto block_f7))
-    (block_t6 . (seq (assign tmp8 (has-type (void) Void)) (goto block_body5)))
-    (block_f7 . (seq (collect 24) (goto block_body5)))
-    (block_t8 . (goto block_t6))))
+    (define ((locals . ((tmp28 . Int)))) tmp3 tmp4 (start6 . (seq (assign tmp28 1) (return (+ tmp4 tmp28)))))
+    (define ((locals . ((tmp5 . (Vector [Int; Int])) (tmp6 . Void) (tmp7 . Void) (tmp8 . Void) (tmp29 . (Vector [Int; Int])) (tmp30 . (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int])))) (tmp31 . (Fn ([Int], Int))) (tmp34 . Int) (tmp36 . Int) (tmp37 . Int) (tmp38 . Int) (tmp39 . Int) (tmp40 . Int)))) main  (start12 . (seq (assign tmp30 (fun-ref tmp0)) (seq (assign tmp31 (fun-ref tmp3)) (seq (assign tmp38 (global-value free_ptr)) (seq (assign tmp39 24) (seq (assign tmp37 (+ tmp38 tmp39)) (seq (assign tmp40 (global-value fromspace_end)) (if (< tmp37 tmp40) block_t10 block_f11))))))))
+    (block_t10 . (goto block_t8))
+    (block_f9 . (seq (collect 24) (goto block_body7)))
+    (block_body7 . (seq (assign tmp5 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp34 0) (seq (assign tmp7 (vector-set! tmp5 0 tmp34)) (seq (assign tmp36 41) (seq (assign tmp6 (vector-set! tmp5 1 tmp36)) (seq (assign tmp29 (call tmp30 tmp31 tmp32)) (return (vector-ref tmp29 1)))))))))
+    (block_t8 . (seq (assign tmp8 (void)) (goto block_body7)))
+    (block_f11 . (goto block_f9))))
     |}]
