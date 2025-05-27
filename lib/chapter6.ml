@@ -781,12 +781,61 @@ module SelectInstructions (F : C3) (X86 : X86_3) :
   module ArgLimitList = LimitFn (ArgHList)
   type 'a def = unit X86.def
 
-  (* TODO: (assign a (fun-ref b)) -> (leaq (fun-ref b) a) *)
-  let fun_ref _label = failwith ""
-  let call _f _ps = failwith ""
-  let tailcall _f _ps = failwith ""
-  let define ?locals:_ _v _vs _body = failwith ""
-  let program _defs = failwith ""
+  let call_conv = X86.[| rdi; rsi; rdx; rcx; r8; r9 |]
+
+  let pass_params : type r. r ArgLimitList.limit -> unit X86.instr list =
+    function
+    | LX ([ a; b; c; d; e; f ], _) ->
+      X86.
+        [
+          movq (snd f) (reg r9);
+          movq (snd e) (reg r8);
+          movq (snd d) (reg rcx);
+          movq (snd c) (reg rdx);
+          movq (snd b) (reg rsi);
+          movq (snd a) (reg rdi);
+        ]
+    | L l ->
+      let rec go : type r. int -> r ArgHList.hlist -> unit X86.instr list =
+       fun i -> function
+         | x :: xs ->
+           X86.(movq (snd x) (reg call_conv.(i))) :: go (Stdlib.( + ) i 1) xs
+         | [] -> []
+      in
+      go 0 l
+  let extract_params vs =
+    let rec go =
+     fun i -> function
+       | x :: xs ->
+         X86.(movq (reg call_conv.(i)) (var x)) :: go (Stdlib.( + ) i 1) xs
+       | [] -> []
+    in
+    go 0 vs
+
+  let fun_ref l = function
+    | Assign v -> X86.[ leaq (fun_ref l) (var v) ]
+    | Return -> X86.[ leaq (fun_ref l) (reg rax) ]
+    | If _ -> failwith "(fun-ref) cannot be a condition of if"
+
+  let call (_, fn) ps = function
+    | Assign v ->
+      X86.[ movq (reg rax) (var v); indirect_callq fn ] @ pass_params ps
+    | Return -> X86.indirect_callq fn :: pass_params ps
+    | If (t, f) ->
+      X86.[ jmp t; jmp_if E f; cmpq (int 0) (reg rax); indirect_callq fn ]
+      @ pass_params ps
+
+  let tailcall (_, f) ps = X86.tail_jmp f :: pass_params ps
+
+  let define ?(locals = []) v vs body =
+    let locals = StringMap.of_list locals in
+    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_block =
+      (exit_label, X86.block (List.rev (X86.retq :: extract_params vs)))
+    in
+    X86.define ~locals v (exit_block :: body)
+
+  let program = X86.program
 end
 
 module R4_Shrink_Pretty () = struct
@@ -859,6 +908,28 @@ module C3_Pretty = struct
     "(define ((locals . " ^ info locals ^ ")) " ^ v ^ " " ^ String.concat " " vs
     ^ " " ^ body ^ ")"
   let program defs = "(program \n" ^ String.concat "\n" defs ^ ")"
+end
+
+module X86_3_Pretty = struct
+  include Chapter5.X86_2_Pretty
+  let fun_ref label = "(fun-ref " ^ label ^ ")"
+  let indirect_callq arg = "(indirect-callq " ^ arg ^ ")"
+  let tail_jmp arg = "(tail-jmp " ^ arg ^ ")"
+  let leaq a b = "(leaq " ^ a ^ " " ^ b ^ ")"
+  type 'a def = string
+  let function_helper info label body =
+    "(define " ^ info ^ " " ^ label
+    ^ String.concat "\n"
+        (List.map (fun (l, t) -> "(" ^ l ^ " . " ^ t ^ ")") body)
+    ^ ")"
+  let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves label body =
+    let info =
+      enclose @@ locals_info locals
+      ^ root_stack_info root_stack_size
+      ^ program_info stack_size conflicts moves
+    in
+    function_helper info label body
+  let program = String.concat "\n"
 end
 
 module Ex1 (F : R4_Let) = struct
