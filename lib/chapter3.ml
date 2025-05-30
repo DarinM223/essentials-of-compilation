@@ -6,7 +6,7 @@ module UncoverLivePass (X86 : X86_0) = struct
   end)
   module X_arg = struct
     type 'a from = 'a X86.arg
-    type 'a term = string option * 'a from
+    type 'a term = Arg.t option * 'a from
     let fwd a = (None, a)
     let bwd (_, a) = a
   end
@@ -14,17 +14,13 @@ module UncoverLivePass (X86 : X86_0) = struct
   module X_instr = struct
     type 'a from = 'a X86.instr
     type ann = {
-      vars_write : StringSet.t;
-      vars_read : StringSet.t;
+      args_write : ArgSet.t;
+      args_read : ArgSet.t;
       jmp_label : X86.label option;
     }
     type 'a term = ann * 'a from
     let fwd a =
-      ( {
-          vars_write = StringSet.empty;
-          vars_read = StringSet.empty;
-          jmp_label = None;
-        },
+      ( { args_write = ArgSet.empty; args_read = ArgSet.empty; jmp_label = None },
         a )
     let bwd (_, a) = a
   end
@@ -36,14 +32,16 @@ module UncoverLivePass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
 
+  module X86_String = X86_Reg_String (X86)
+
   module IDelta = struct
-    let var v = (Some v, X86.var v)
+    let var v = (Some (Arg.Var v), X86.var v)
+    let reg r = (Some (X86_String.arg_of_reg r), X86.reg r)
 
     let add_read (v, _) (ann, r) =
       let ann =
         match v with
-        | Some v ->
-          X_instr.{ ann with vars_read = StringSet.add v ann.vars_read }
+        | Some v -> X_instr.{ ann with args_read = ArgSet.add v ann.args_read }
         | None -> ann
       in
       (ann, r)
@@ -51,10 +49,12 @@ module UncoverLivePass (X86 : X86_0) = struct
       let ann =
         match v with
         | Some v ->
-          X_instr.{ ann with vars_write = StringSet.add v ann.vars_write }
+          X_instr.{ ann with args_write = ArgSet.add v ann.args_write }
         | None -> ann
       in
       (ann, r)
+
+    let caller_saves = X86.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
 
     let one_arg_instr f a = f (X_arg.bwd a) |> X_instr.fwd |> add_read a
     let two_arg_instr f a b =
@@ -67,7 +67,11 @@ module UncoverLivePass (X86 : X86_0) = struct
       |> X_instr.fwd |> add_read a |> add_write b
     let retq = X_instr.fwd X86.retq
     let negq a = one_arg_instr X86.negq a
-    let callq l = X_instr.fwd @@ X86.callq l
+    let callq l =
+      X_instr.fwd (X86.callq l)
+      |> List.fold_right
+           (fun r instr -> instr |> add_write (reg r))
+           caller_saves
     let pushq a = one_arg_instr X86.pushq a
     let popq a = one_arg_instr X86.pushq a
 
@@ -75,13 +79,13 @@ module UncoverLivePass (X86 : X86_0) = struct
       let anns, instrs = List.split instrs in
       let anns = Array.of_list anns in
       (* First element is the live set before the first instruction (live_before). *)
-      let live_after = Array.make (Array.length anns + 1) StringSet.empty in
+      let live_after = Array.make (Array.length anns + 1) ArgSet.empty in
       for i = Array.length anns - 1 downto 0 do
         live_after.(i) <-
-          StringSet.(
+          ArgSet.(
             union
-              (diff live_after.(i + 1) anns.(i).X_instr.vars_write)
-              anns.(i).vars_read)
+              (diff live_after.(i + 1) anns.(i).X_instr.args_write)
+              anns.(i).args_read)
       done;
       X86.block ~live_after instrs
   end
@@ -176,7 +180,7 @@ module BuildInterferencePass (X86 : X86_0) = struct
   end
   module X_instr = struct
     type 'a from = 'a X86.instr
-    type 'a term = (StringSet.t -> acc_graph) * 'a from
+    type 'a term = (ArgSet.t -> acc_graph) * 'a from
     let fwd a = ((fun _ graph -> graph), a)
     let bwd (_, a) = a
   end
@@ -191,13 +195,12 @@ module BuildInterferencePass (X86 : X86_0) = struct
   end)
   module IDelta = struct
     include Chapter2_definitions.X86_Reg_String (X86)
-    let arg_of_reg reg = Arg.Reg (string_of_reg reg)
     let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
 
     let arith dest live_after graph =
-      StringSet.fold
-        (fun v graph -> GraphUtils.add_interference dest (Arg.Var v) graph)
+      ArgSet.fold
+        (fun v graph -> GraphUtils.add_interference dest v graph)
         live_after graph
     let caller_saves = X86.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
 
@@ -226,9 +229,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
       match dest with
       | Some dest ->
         let acc_graph live_after graph =
-          StringSet.fold
+          ArgSet.fold
             (fun v graph ->
-              let v = Arg.Var v in
               if Some v = src || v = dest then
                 graph
               else
@@ -243,11 +245,9 @@ module BuildInterferencePass (X86 : X86_0) = struct
         let edges =
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
-          let* v = StringSet.to_list live_after in
-          (* TODO: change live_after to be of Arg so it can contain
-             both registers or variables *)
-          if Arg.Var v <> arg_of_reg r then
-            [ (arg_of_reg r, Arg.Var v) ]
+          let* v = ArgSet.to_list live_after in
+          if v <> arg_of_reg r then
+            [ (arg_of_reg r, v) ]
           else
             []
         in
@@ -468,8 +468,10 @@ let%expect_test "Example 1 after uncover live" =
   Format.printf "Ex1: %s\n" M.res;
   [%expect
     {|
-    Ex1: (program () (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
-      y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+    Ex1: (program () (start . (block ([{}; {Var v}; {Var v; Var w}; {Var w; Var x}; {Var w; Var x};
+      {Var w; Var x; Var y}; {Var w; Var x; Var y}; {Var w; Var y; Var z};
+      {Var y; Var z}; {Var t.1; Var z}; {Var t.1; Var z}; {Var t.1; Reg rax}; {
+      }; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
     (movq (var v) (var x))
@@ -533,8 +535,10 @@ let%expect_test "Example 1 after build interference" =
                               Reg rsi};
                   Reg rsi -> {Reg r10; Reg r11; Reg r12; Reg r13; Reg r14;
                               Reg r15; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
-                              Reg rdx}})) (start . (block ([{}; {v}; {v; w}; {w; x}; {w; x}; {w; x; y}; {w; x; y}; {w; y; z}; {
-      y; z}; {t.1; z}; {t.1; z}; {t.1}; {}; {}])
+                              Reg rdx}})) (start . (block ([{}; {Var v}; {Var v; Var w}; {Var w; Var x}; {Var w; Var x};
+      {Var w; Var x; Var y}; {Var w; Var x; Var y}; {Var w; Var y; Var z};
+      {Var y; Var z}; {Var t.1; Var z}; {Var t.1; Var z}; {Var t.1; Reg rax}; {
+      }; {}])
     (movq (int 1) (var v))
     (movq (int 46) (var w))
     (movq (var v) (var x))

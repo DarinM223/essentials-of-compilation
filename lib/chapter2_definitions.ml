@@ -305,7 +305,7 @@ module type X86_0 = sig
   val popq : 'a arg -> unit instr
 
   type 'a block
-  val block : ?live_after:StringSet.t array -> unit instr list -> unit block
+  val block : ?live_after:ArgSet.t array -> unit instr list -> unit block
 
   type 'a program
   val program :
@@ -341,6 +341,7 @@ module X86_Reg_String (X86 : X86_0) = struct
     | reg when reg = Hashtbl.hash X86.r14 -> "r14"
     | reg when reg = Hashtbl.hash X86.r15 -> "r15"
     | _ -> failwith "Unknown register"
+  let arg_of_reg reg = Arg.Reg (string_of_reg reg)
 end
 
 module X86_0_Reg_T
@@ -506,7 +507,7 @@ module X86_0_Pretty = struct
   let pp_live_after fmt =
     let open Format in
     let pp_sep fmt _ = fprintf fmt ";@ " in
-    fprintf fmt "[@[%a]@]" @@ pp_print_array ~pp_sep StringSet.pp
+    fprintf fmt "[@[%a]@]" @@ pp_print_array ~pp_sep ArgSet.pp
 
   let block_info live_after =
     match live_after with

@@ -482,11 +482,11 @@ module UncoverLivePass (X86 : X86_1) = struct
     type 'a term = {
       (* Every block requires a list of the live_before sets of its successor blocks.
          Returns the live before set of the current block along with the rest of the block. *)
-      build_fn : StringSet.t list -> StringSet.t * 'a from;
+      build_fn : ArgSet.t list -> ArgSet.t * 'a from;
       (* List of successor labels for the block. *)
       successors : X86.label list;
     }
-    let fwd b = { build_fn = (fun _ -> (StringSet.empty, b)); successors = [] }
+    let fwd b = { build_fn = (fun _ -> (ArgSet.empty, b)); successors = [] }
     let bwd { build_fn; _ } = snd (build_fn [])
   end
 
@@ -517,17 +517,17 @@ module UncoverLivePass (X86 : X86_1) = struct
       Array.iter add_successor anns;
       let build_fn succ_live_before =
         (* First element is the live set before the first instruction (live_before). *)
-        let live_after = Array.make (Array.length anns + 1) StringSet.empty in
+        let live_after = Array.make (Array.length anns + 1) ArgSet.empty in
         (* Live after set of the block is the union of the live before sets of the
            successor blocks. *)
         live_after.(Array.length anns) <-
-          List.fold_left StringSet.union StringSet.empty succ_live_before;
+          List.fold_left ArgSet.union ArgSet.empty succ_live_before;
         for i = Array.length anns - 1 downto 0 do
           live_after.(i) <-
-            StringSet.(
+            ArgSet.(
               union
-                (diff live_after.(i + 1) anns.(i).X_instr.vars_write)
-                anns.(i).vars_read)
+                (diff live_after.(i + 1) anns.(i).X_instr.args_write)
+                anns.(i).args_read)
         done;
         (live_after.(0), X86.block ~live_after instrs)
       in
@@ -603,9 +603,8 @@ module BuildInterferencePass (X86 : X86_1) = struct
       match dest with
       | Some dest ->
         let acc_graph live_after graph =
-          StringSet.fold
+          ArgSet.fold
             (fun v graph ->
-              let v = Arg.Var v in
               if Some v = src || v = dest then
                 graph
               else
@@ -928,43 +927,45 @@ let%expect_test "Uncover live" =
   Format.printf "Ex6: %s\n" M.res;
   [%expect
     {|
-    Ex6: (program () (start . (block ([{}; {tmp0}; {tmp0; tmp1}; {tmp0; tmp1; tmp20}; {tmp0; tmp1}; {tmp0; tmp1};
-      {tmp0; tmp1}])
+    Ex6: (program () (start . (block ([{}; {Var tmp0}; {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1; Var tmp20};
+      {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (movq (int 5) (var tmp0))
     (movq (int 6) (var tmp1))
     (movq (int 5) (var tmp20))
     (cmpq (var tmp20) (var tmp0))
     (jmp-if L block_t6)
     (jmp block_f13)))
-    (block_t6 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
+    (block_t6 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (jmp block_f5)))
-    (block_f13 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp22}; {tmp0; tmp1}; {tmp0; tmp1};
-      {tmp0; tmp1}])
+    (block_f13 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1; Var tmp22};
+      {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (movq (int 7) (var tmp22))
     (cmpq (var tmp22) (var tmp1))
     (jmp-if E block_t9)
     (jmp block_f12)))
-    (block_t9 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp2}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
+    (block_t9 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1; Var tmp2}; {Var tmp0; Var tmp1};
+      {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (movq (int 1) (var tmp2))
     (cmpq (int 0) (var tmp2))
     (jmp-if E block_f8)
     (jmp block_t7)))
-    (block_f12 . (block ([{tmp0; tmp1}; {tmp0; tmp1; tmp24}; {tmp0; tmp1}; {tmp0; tmp1};
-      {tmp0; tmp1}])
+    (block_f12 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1; Var tmp24};
+      {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (movq (int 6) (var tmp24))
     (cmpq (var tmp24) (var tmp1))
     (jmp-if E block_t10)
     (jmp block_f11)))
-    (block_t7 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
+    (block_t7 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (jmp block_f5)))
     (block_f8 . (block ([{}; {}])
     (jmp block_t0)))
     (block_t10 . (block ([{}; {}])
     (jmp block_t0)))
-    (block_f11 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
+    (block_f11 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (jmp block_f5)))
-    (block_t0 . (block ([{}; {tmp3}; {tmp3; tmp7}; {tmp3; tmp4}; {tmp3; tmp4}; {tmp3; tmp4; tmp5};
-      {tmp3; tmp5}; {tmp3}; {}; {}])
+    (block_t0 . (block ([{}; {Var tmp3}; {Var tmp3; Var tmp7}; {Var tmp3; Var tmp4};
+      {Var tmp3; Var tmp4}; {Var tmp3; Var tmp4; Var tmp5}; {Var tmp3; Var tmp5};
+      {Var tmp3; Reg rax}; {}; {}])
     (movq (int 10) (var tmp3))
     (movq (int 1) (var tmp7))
     (movq (var tmp7) (var tmp4))
@@ -974,19 +975,21 @@ let%expect_test "Uncover live" =
     (movq (var tmp5) (reg rax))
     (addq (var tmp3) (reg rax))
     (jmp block_exit)))
-    (block_f5 . (block ([{tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}; {tmp0; tmp1}])
+    (block_f5 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}; {Var tmp0; Var tmp1};
+      {Var tmp0; Var tmp1}])
     (cmpq (var tmp1) (var tmp0))
     (jmp-if L block_t3)
     (jmp block_f4)))
-    (block_t3 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
+    (block_t3 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (jmp block_t1)))
-    (block_f4 . (block ([{tmp0; tmp1}; {tmp0; tmp1}])
+    (block_f4 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp1}])
     (jmp block_f2)))
-    (block_t1 . (block ([{tmp0; tmp1}; {tmp1}; {}; {}])
+    (block_t1 . (block ([{Var tmp0; Var tmp1}; {Var tmp1; Reg rax}; {}; {}])
     (movq (var tmp0) (reg rax))
     (addq (var tmp1) (reg rax))
     (jmp block_exit)))
-    (block_f2 . (block ([{tmp0; tmp1}; {tmp0; tmp6}; {tmp0; tmp6}; {tmp6}; {}; {}])
+    (block_f2 . (block ([{Var tmp0; Var tmp1}; {Var tmp0; Var tmp6}; {Var tmp0; Var tmp6};
+      {Var tmp6; Reg rax}; {}; {}])
     (movq (var tmp1) (var tmp6))
     (negq (var tmp6))
     (movq (var tmp0) (reg rax))

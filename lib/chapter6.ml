@@ -877,13 +877,11 @@ module UncoverLivePass (F : X86_3) = struct
   module IDelta = struct
     include IDelta
 
-    let caller_saves = F.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
-
     let indirect_callq arg =
       X_instr.fwd (F.indirect_callq (X_arg.bwd arg))
       |> add_read arg
       |> List.fold_right
-           (fun r instr -> instr |> add_write (None, F.reg r))
+           (fun r instr -> instr |> add_write (reg r))
            caller_saves
     let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks =
       let blocks = program_helper blocks in
