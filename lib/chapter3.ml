@@ -244,7 +244,12 @@ module BuildInterferencePass (X86 : X86_0) = struct
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
           let* v = StringSet.to_list live_after in
-          [ (arg_of_reg r, Arg.Var v) ]
+          (* TODO: change live_after to be of Arg so it can contain
+             both registers or variables *)
+          if Arg.Var v <> arg_of_reg r then
+            [ (arg_of_reg r, Arg.Var v) ]
+          else
+            []
         in
         List.fold_left
           (fun graph (k, v) -> GraphUtils.add_interference k v graph)

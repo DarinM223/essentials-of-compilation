@@ -400,6 +400,37 @@ module X86_2_of_X86_3 (F : X86_3) = struct
       ]
 end
 
+module X86_3_T
+    (X_reg : Chapter1.TRANS)
+    (X_arg : Chapter1.TRANS)
+    (X_instr : Chapter1.TRANS)
+    (X_block : Chapter1.TRANS)
+    (X_def : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      X86_3
+        with type 'a reg = 'a X_reg.from
+         and type 'a arg = 'a X_arg.from
+         and type 'a instr = 'a X_instr.from
+         and type 'a block = 'a X_block.from
+         and type 'a def = 'a X_def.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include
+    Chapter5.X86_2_T (X_reg) (X_arg) (X_instr) (X_block) (X_program)
+      (X86_2_of_X86_3 (F))
+  type 'a def = 'a X_def.term
+  let fun_ref label = X_arg.fwd (F.fun_ref label)
+  let indirect_callq arg = X_instr.fwd (F.indirect_callq (X_arg.bwd arg))
+  let tail_jmp arg = X_instr.fwd (F.tail_jmp (X_arg.bwd arg))
+  let leaq a1 a2 = X_instr.fwd (F.leaq (X_arg.bwd a1) (X_arg.bwd a2))
+  let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks =
+    X_def.fwd
+    @@ F.define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v
+    @@ List.map (fun (l, b) -> (l, X_block.bwd b)) blocks
+  let program defs = X_program.fwd @@ F.program @@ List.map X_def.bwd defs
+end
+
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
   module R = struct
@@ -836,6 +867,36 @@ module SelectInstructions (F : C3) (X86 : X86_3) :
     X86.define ~locals v (exit_block :: body)
 
   let program = X86.program
+end
+
+module UncoverLivePass (F : X86_3) = struct
+  include Chapter4.UncoverLivePass (Chapter5.X86_1_of_X86_2 (X86_2_of_X86_3 (F)))
+  module X_def = Chapter1.MkId (struct
+    type 'a t = 'a F.def
+  end)
+  module IDelta = struct
+    include IDelta
+
+    let caller_saves = F.[ rax; rcx; rdx; rsi; rdi; r8; r9; r10; r11 ]
+
+    let indirect_callq arg =
+      X_instr.fwd (F.indirect_callq (X_arg.bwd arg))
+      |> add_read arg
+      |> List.fold_right
+           (fun r instr -> instr |> add_write (None, F.reg r))
+           caller_saves
+    let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks =
+      let blocks = program_helper blocks in
+      F.define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks
+    let program = F.program
+  end
+end
+module UncoverLive (F : X86_3) : X86_3 with type 'a obs = 'a F.obs = struct
+  module M = UncoverLivePass (F)
+  include
+    X86_3_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_def) (M.X_program)
+      (F)
+  include M.IDelta
 end
 
 module R4_Shrink_Pretty () = struct
