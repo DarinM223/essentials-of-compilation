@@ -69,9 +69,7 @@ module UncoverLivePass (X86 : X86_0) = struct
     let negq a = one_arg_instr X86.negq a
     let callq l =
       X_instr.fwd (X86.callq l)
-      |> List.fold_right
-           (fun r instr -> instr |> add_write (reg r))
-           caller_saves
+      |> List.fold_right (fun r -> add_write (reg r)) caller_saves
     let pushq a = one_arg_instr X86.pushq a
     let popq a = one_arg_instr X86.pushq a
 

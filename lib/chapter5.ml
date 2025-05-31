@@ -141,7 +141,14 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
     let t, e = e m in
     (t, F.neg e)
   let ( + ) e1 e2 m = bin_op F.( + ) e1 e2 m
-  let var v m = (StringMap.find (F.string_of_var v) m, F.var v)
+  let var v m =
+    let v_str = F.string_of_var v in
+    let ty =
+      match StringMap.find_opt v_str m with
+      | Some ty -> ty
+      | None -> failwith @@ "Could not lookup type for variable: " ^ v_str
+    in
+    (ty, F.var v)
   let fresh = F.fresh
   let var_of_string = F.var_of_string
   let string_of_var = F.string_of_var
@@ -653,8 +660,7 @@ module BuildInterferencePass (X86 : X86_2) = struct
 
     include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
 
-    let program ?(locals = StringMap.empty) ?stack_size ?root_stack_size
-        ?conflicts:_ ?moves blocks =
+    let build_interference_graph locals blocks =
       let interference_graph =
         (* If a vector typed variable is live during a call to the collector,
            it must be spilled to ensure it is visible to the collector.
@@ -674,9 +680,7 @@ module BuildInterferencePass (X86 : X86_2) = struct
           match typ with
           | R3_Types.Vector _ ->
             let add_register_interference acc reg =
-              GraphUtils.add_interference
-                (Reg (string_of_reg reg))
-                (Var var) acc
+              GraphUtils.add_interference (arg_of_reg reg) (Var var) acc
             in
             let add_var_interference acc var' =
               GraphUtils.add_interference (Var var') (Var var) acc
@@ -688,29 +692,39 @@ module BuildInterferencePass (X86 : X86_2) = struct
         in
         StringMap.fold add_pointer_interferences locals init_interference_graph
       in
-      let interference_graph =
-        List.fold_left
-          (fun graph (_, (f, _)) -> f graph)
-          interference_graph blocks
-      in
+      List.fold_left
+        (fun graph (_, (f, _)) -> f graph)
+        interference_graph blocks
+
+    let program ?(locals = StringMap.empty) ?stack_size ?root_stack_size
+        ?conflicts:_ ?moves blocks =
+      let interference_graph = build_interference_graph locals blocks in
       let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
       X86.program ~locals ?stack_size ?root_stack_size
         ~conflicts:interference_graph ?moves blocks
   end
 end
-module BuildInterference (F : X86_2) = struct
+module BuildInterference (F : X86_2) : X86_2 with type 'a obs = 'a F.obs =
+struct
   module M = BuildInterferencePass (F)
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
 end
 
+module BuildMovesPass (X86 : X86_2) = struct
+  include Chapter4.BuildMovesPass (X86_1_of_X86_2 (X86))
+  module IDelta = struct
+    include IDelta
+    let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves:_ blocks
+        =
+      let moves, blocks = program_helper blocks in
+      X86.program ?locals ?stack_size ?root_stack_size ?conflicts ~moves blocks
+  end
+end
 module BuildMoves (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
-  module M = Chapter4.BuildMovesPass (X86_1_of_X86_2 (F))
+  module M = BuildMovesPass (F)
   include X86_2_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_program) (F)
   include M.IDelta
-  let program ?locals ?stack_size ?root_stack_size ?conflicts ?moves:_ blocks =
-    let moves, blocks = program_helper blocks in
-    F.program ?locals ?stack_size ?root_stack_size ?conflicts ~moves blocks
 end
 
 module AllocateRegistersPass (X86 : X86_2) = struct
@@ -731,8 +745,7 @@ module AllocateRegistersPass (X86 : X86_2) = struct
 
     include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
 
-    let program ?(locals = StringMap.empty) ?stack_size:_ ?root_stack_size:_
-        ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) blocks () =
+    let program_helper locals conflicts moves blocks =
       let root_stack_size = ref 0 in
       let stack_size = ref 0 in
       let color_slot_table : (int, int) Hashtbl.t = Hashtbl.create 100 in
@@ -750,15 +763,25 @@ module AllocateRegistersPass (X86 : X86_2) = struct
       let colors = GraphUtils.color_graph moves conflicts vars in
       let get_arg v =
         let color = ArgMap.find_var v colors in
-        let typ = StringMap.find v locals in
+        let typ =
+          match StringMap.find_opt v locals with
+          | Some typ -> typ
+          | None -> failwith @@ "Could not lookup type for local variable: " ^ v
+        in
         reg_of_color root_stack_size stack_size color_slot_table regs typ color
       in
       let blocks =
         try List.map (fun (l, b) -> (l, b ())) blocks
         with effect Rename v, k -> Effect.Deep.continue k (get_arg v)
       in
-      X86.program ~locals ~stack_size:!stack_size
-        ~root_stack_size:!root_stack_size ~conflicts ~moves blocks
+      (!stack_size, !root_stack_size, conflicts, moves, blocks)
+
+    let program ?(locals = StringMap.empty) ?stack_size:_ ?root_stack_size:_
+        ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) blocks () =
+      let stack_size, root_stack_size, conflicts, moves, blocks =
+        program_helper locals conflicts moves blocks
+      in
+      X86.program ~locals ~stack_size ~root_stack_size ~conflicts ~moves blocks
   end
 end
 module AllocateRegisters (X86 : X86_2) : X86_2 with type 'a obs = 'a X86.obs =

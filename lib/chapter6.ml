@@ -400,6 +400,32 @@ module X86_2_of_X86_3 (F : X86_3) = struct
       ]
 end
 
+module X86_3_R_T (R : Chapter1.Reader) (F : X86_3) :
+  X86_3
+    with type 'a reg = R.t -> 'a F.reg
+     and type 'a arg = R.t -> 'a F.arg
+     and type 'a instr = R.t -> 'a F.instr
+     and type 'a block = R.t -> 'a F.block
+     and type 'a def = unit -> 'a F.def
+     and type 'a program = unit -> 'a F.program
+     and type label = F.label
+     and type 'a obs = 'a F.obs = struct
+  include Chapter5.X86_2_R_T (R) (X86_2_of_X86_3 (F))
+  type 'a def = unit -> 'a F.def
+  let fun_ref label _ = F.fun_ref label
+  let indirect_callq arg r = F.indirect_callq (arg r)
+  let tail_jmp arg r = F.tail_jmp (arg r)
+  let leaq a1 a2 r =
+    let a1 = a1 r in
+    let a2 = a2 r in
+    F.leaq a1 a2
+  let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v body () =
+    let init = R.init () in
+    F.define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v
+      (List.map (fun (l, b) -> (l, b init)) body)
+  let program defs () = F.program @@ List.map (fun def -> def ()) defs
+end
+
 module X86_3_T
     (X_reg : Chapter1.TRANS)
     (X_arg : Chapter1.TRANS)
@@ -730,7 +756,7 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
 
   let rec args_of_vars : type r. r VarHList.hlist -> r C3.ArgHList.hlist =
     function
-    | x :: xs -> C3.var (F.string_of_var x) :: args_of_vars xs
+    | x :: xs -> C3.var (lookup (F.string_of_var x)) :: args_of_vars xs
     | [] -> []
   let args_of_vars_limit : type r.
       r VarLimitList.limit -> r C3.ArgLimitList.limit = function
@@ -747,8 +773,9 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
       | [], [] ->
         let args = args_of_vars_limit vs in
         (match r with
-        | Tail -> C3.(tailcall (var e) args)
-        | Assign (v, body) -> C3.(assign v (m.f (call (var e) args)) @> body ())
+        | Tail -> C3.(tailcall (var (lookup e)) args)
+        | Assign (v, body) ->
+          C3.(assign v (m.f (call (var (lookup e)) args)) @> body ())
         | Pred _ -> failwith "Call should not be in an if expression")
     in
     let go : type r. r ExpLimitList.limit * r VarLimitList.limit -> unit C3.tail
@@ -758,21 +785,30 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
       | _ -> failwith "app: ExpLimitList and VarLimitList are different sizes"
     in
     go (es, vs)
-  let define _ty v vs body rest () =
+  let define ty v vs body rest () =
     Hashtbl.clear block_map;
     let start_body = body ann_id Tail in
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
     let start_block = fresh_block "start" in
     let blocks = (start_block, start_body) :: blocks in
-    let rec go : type r. r VarHList.hlist -> string list = function
-      | x :: xs -> F.string_of_var x :: go xs
-      | [] -> []
+    let (Ty.Fn (tys, _)) = ty in
+    let rec param_locals : type r.
+        r Ty.TyLimitList.HList.hlist * r VarHList.hlist ->
+        (string * R3_Types.typ) list = function
+      | t :: ts, v :: vs ->
+        (F.string_of_var v, Ty.reflect t) :: param_locals (ts, vs)
+      | [], [] -> []
     in
-    let go : type r. r VarLimitList.limit -> string list = function
-      | LX (l, _) -> go l
-      | L l -> go l
+    let param_locals : type r.
+        r Ty.TyLimitList.limit * r VarLimitList.limit ->
+        (string * R3_Types.typ) list = function
+      | LX (ts, _), LX (vs, _) -> param_locals (ts, vs)
+      | L ts, L vs -> param_locals (ts, vs)
+      | _ -> failwith "This cannot happen"
     in
-    C3.define (F.string_of_var v) (go vs) blocks :: rest ()
+    let locals = param_locals (tys, vs) in
+    C3.define ~locals (F.string_of_var v) (List.map fst locals) blocks
+    :: rest ()
   let body _ _ () =
     failwith "ExplicateControl: body should have been eliminated"
   let endd () () = []
@@ -784,13 +820,13 @@ module UncoverLocalsPass (F : C3) = struct
   include Chapter5.UncoverLocalsPass (C2_of_C3 (F))
   module IDelta = struct
     include IDelta
-    let define ?locals:_ v vs body () =
+    let define ?(locals = []) v vs body () =
       let ((_, table) as init) = R.init () in
       let body = List.map (fun (l, t) -> (l, t init)) body in
-      let locals =
+      let locals' =
         StringHashtbl.to_seq table |> List.of_seq |> List.sort R.compare
       in
-      F.define ~locals v vs body
+      F.define ~locals:(locals @ locals') v vs body
 
     let program defs () =
       let defs = List.map (fun def -> def ()) defs in
@@ -880,9 +916,7 @@ module UncoverLivePass (F : X86_3) = struct
     let indirect_callq arg =
       X_instr.fwd (F.indirect_callq (X_arg.bwd arg))
       |> add_read arg
-      |> List.fold_right
-           (fun r instr -> instr |> add_write (reg r))
-           caller_saves
+      |> List.fold_right (fun r -> add_write (reg r)) caller_saves
     let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks =
       let blocks = program_helper blocks in
       F.define ?locals ?stack_size ?root_stack_size ?conflicts ?moves v blocks
@@ -894,6 +928,73 @@ module UncoverLive (F : X86_3) : X86_3 with type 'a obs = 'a F.obs = struct
   include
     X86_3_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_def) (M.X_program)
       (F)
+  include M.IDelta
+end
+
+module BuildInterferencePass (F : X86_3) = struct
+  include Chapter5.BuildInterferencePass (X86_2_of_X86_3 (F))
+  module X_def = Chapter1.MkId (struct
+    type 'a t = 'a F.def
+  end)
+  module IDelta = struct
+    include IDelta
+    let define ?(locals = StringMap.empty) ?stack_size ?root_stack_size
+        ?conflicts:_ ?moves v blocks =
+      let interference_graph = build_interference_graph locals blocks in
+      let blocks = List.map (fun (l, (_, block)) -> (l, block)) blocks in
+      F.define ~locals ?stack_size ?root_stack_size
+        ~conflicts:interference_graph ?moves v blocks
+    let program = F.program
+  end
+end
+module BuildInterference (F : X86_3) : X86_3 with type 'a obs = 'a F.obs =
+struct
+  module M = BuildInterferencePass (F)
+  include
+    X86_3_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_def) (M.X_program)
+      (F)
+  include M.IDelta
+end
+
+module BuildMovesPass (F : X86_3) = struct
+  include Chapter5.BuildMovesPass (X86_2_of_X86_3 (F))
+  module X_def = Chapter1.MkId (struct
+    type 'a t = 'a F.def
+  end)
+  module IDelta = struct
+    include IDelta
+    let define ?locals ?stack_size ?root_stack_size ?conflicts ?moves:_ v blocks
+        =
+      let moves, blocks = program_helper blocks in
+      F.define ?locals ?stack_size ?root_stack_size ?conflicts ~moves v blocks
+    let program = F.program
+  end
+end
+module BuildMoves (F : X86_3) : X86_3 with type 'a obs = 'a F.obs = struct
+  module M = BuildMovesPass (F)
+  include
+    X86_3_T (M.X_reg) (M.X_arg) (M.X_instr) (M.X_block) (M.X_def) (M.X_program)
+      (F)
+  include M.IDelta
+end
+
+module AllocateRegistersPass (X86 : X86_3) = struct
+  include Chapter5.AllocateRegistersPass (X86_2_of_X86_3 (X86))
+  module IDelta = struct
+    include IDelta
+    let define ?(locals = StringMap.empty) ?stack_size:_ ?root_stack_size:_
+        ?(conflicts = ArgMap.empty) ?(moves = ArgMap.empty) v blocks () =
+      let stack_size, root_stack_size, conflicts, moves, blocks =
+        program_helper locals conflicts moves blocks
+      in
+      X86.define ~locals ~stack_size ~root_stack_size ~conflicts ~moves v blocks
+    let program defs () = X86.program @@ List.map (fun def -> def ()) defs
+  end
+end
+module AllocateRegisters (F : X86_3) : X86_3 with type 'a obs = 'a F.obs =
+struct
+  module M = AllocateRegistersPass (F)
+  include X86_3_R_T (M.X_reader) (F)
   include M.IDelta
 end
 
@@ -1161,22 +1262,23 @@ let%expect_test "Example 1 ExplicateControl & UncoverLocals" =
   [%expect
     {|
     Ex1: (program
-    (define ((locals . ((tmp9 . (Vector [Int; Int])) (tmp10 . Void) (tmp11 . Void) (tmp12 . Void) (tmp14 . Int) (tmp16 . Int) (tmp19 . Int) (tmp21 . Int) (tmp23 . Int) (tmp24 . Int) (tmp25 . Int) (tmp26 . Int)))) tmp0 tmp1 tmp2 (start5 . (seq (assign tmp24 (global-value free_ptr)) (seq (assign tmp25 24) (seq (assign tmp23 (+ tmp24 tmp25)) (seq (assign tmp26 (global-value fromspace_end)) (if (< tmp23 tmp26) block_t3 block_f4))))))
+    (define ((locals . ((tmp1 . (Fn ([Int], Int))) (tmp2 . (Vector [Int; Int])) (tmp9 . (Vector [Int; Int])) (tmp10 . Void) (tmp11 . Void) (tmp12 . Void) (tmp14 . Int) (tmp16 . Int) (tmp19 . Int) (tmp21 . Int) (tmp23 . Int) (tmp24 . Int) (tmp25 . Int) (tmp26 . Int)))) tmp0 tmp1 tmp2 (start5 . (seq (assign tmp24 (global-value free_ptr)) (seq (assign tmp25 24) (seq (assign tmp23 (+ tmp24 tmp25)) (seq (assign tmp26 (global-value fromspace_end)) (if (< tmp23 tmp26) block_t3 block_f4))))))
     (block_t3 . (goto block_t1))
     (block_f2 . (seq (collect 24) (goto block_body0)))
-    (block_body0 . (seq (assign tmp9 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp16 (vector-ref tmp2 0)) (seq (assign tmp14 (call tmp15 tmp16)) (seq (assign tmp11 (vector-set! tmp9 0 tmp14)) (seq (assign tmp21 (vector-ref tmp2 1)) (seq (assign tmp19 (call tmp20 tmp21)) (seq (assign tmp10 (vector-set! tmp9 1 tmp19)) (return tmp9)))))))))
+    (block_body0 . (seq (assign tmp9 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp16 (vector-ref tmp2 0)) (seq (assign tmp14 (call tmp1 tmp16)) (seq (assign tmp11 (vector-set! tmp9 0 tmp14)) (seq (assign tmp21 (vector-ref tmp2 1)) (seq (assign tmp19 (call tmp1 tmp21)) (seq (assign tmp10 (vector-set! tmp9 1 tmp19)) (return tmp9)))))))))
     (block_t1 . (seq (assign tmp12 (void)) (goto block_body0)))
     (block_f4 . (goto block_f2)))
-    (define ((locals . ((tmp28 . Int)))) tmp3 tmp4 (start6 . (seq (assign tmp28 1) (return (+ tmp4 tmp28)))))
+    (define ((locals . ((tmp4 . Int) (tmp28 . Int)))) tmp3 tmp4 (start6 . (seq (assign tmp28 1) (return (+ tmp4 tmp28)))))
     (define ((locals . ((tmp5 . (Vector [Int; Int])) (tmp6 . Void) (tmp7 . Void) (tmp8 . Void) (tmp29 . (Vector [Int; Int])) (tmp30 . (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int])))) (tmp31 . (Fn ([Int], Int))) (tmp34 . Int) (tmp36 . Int) (tmp37 . Int) (tmp38 . Int) (tmp39 . Int) (tmp40 . Int)))) main  (start12 . (seq (assign tmp30 (fun-ref tmp0)) (seq (assign tmp31 (fun-ref tmp3)) (seq (assign tmp38 (global-value free_ptr)) (seq (assign tmp39 24) (seq (assign tmp37 (+ tmp38 tmp39)) (seq (assign tmp40 (global-value fromspace_end)) (if (< tmp37 tmp40) block_t10 block_f11))))))))
     (block_t10 . (goto block_t8))
     (block_f9 . (seq (collect 24) (goto block_body7)))
-    (block_body7 . (seq (assign tmp5 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp34 0) (seq (assign tmp7 (vector-set! tmp5 0 tmp34)) (seq (assign tmp36 41) (seq (assign tmp6 (vector-set! tmp5 1 tmp36)) (seq (assign tmp29 (call tmp30 tmp31 tmp32)) (return (vector-ref tmp29 1)))))))))
+    (block_body7 . (seq (assign tmp5 (allocate 1 (Vector [Int; Int]))) (seq (assign tmp34 0) (seq (assign tmp7 (vector-set! tmp5 0 tmp34)) (seq (assign tmp36 41) (seq (assign tmp6 (vector-set! tmp5 1 tmp36)) (seq (assign tmp29 (call tmp30 tmp31 tmp5)) (return (vector-ref tmp29 1)))))))))
     (block_t8 . (seq (assign tmp8 (void)) (goto block_body7)))
     (block_f11 . (goto block_f9))))
     |}]
 
-let%expect_test "Example 1 SelectInstructions" =
+let%expect_test
+    "Example 1 SelectInstructions & Uncover Live & Allocate Registers" =
   let module M =
     Ex1
       (TransformLet
@@ -1188,118 +1290,317 @@ let%expect_test "Example 1 SelectInstructions" =
                         (ExplicateControl
                            (F1_Collect_Pretty ())
                            (UncoverLocals
-                              (SelectInstructions (C3_Pretty) (X86_3_Pretty)))
+                              (SelectInstructions
+                                 (C3_Pretty)
+                                 (UncoverLive
+                                    (BuildInterference
+                                       (BuildMoves
+                                          (AllocateRegisters (X86_3_Pretty)))))))
                            ()))))))) in
   Format.printf "Ex1: %s" M.res;
   [%expect
     {|
-    Ex1: (define ((locals . (tmp10 . Void)(tmp11 . Void)(tmp12 . Void)(tmp14 . Int)
-    (tmp16 . Int)(tmp19 . Int)(tmp21 . Int)(tmp23 . Int)(tmp24 . Int)
+    Ex1: (define ((locals . (tmp1 . (Fn ([Int], Int)))(tmp10 . Void)(tmp11 . Void)
+    (tmp12 . Void)(tmp14 . Int)(tmp16 . Int)(tmp19 . Int)
+    (tmp2 . (Vector [Int; Int]))(tmp21 . Int)(tmp23 . Int)(tmp24 . Int)
     (tmp25 . Int)(tmp26 . Int)
-    (tmp9 . (Vector [Int; Int])))) tmp0(block_exit . (block ()
-    (movq (reg rsi) (var tmp2))
-    (movq (reg rdi) (var tmp1))
-    (retq)))
-    (start5 . (block ()
-    (movq (global-value free_ptr) (var tmp24))
-    (movq (int 24) (var tmp25))
-    (movq (var tmp24) (var tmp23))
-    (addq (var tmp25) (var tmp23))
-    (movq (global-value fromspace_end) (var tmp26))
-    (cmpq (var tmp26) (var tmp23))
+    (tmp9 . (Vector [Int; Int])))(root_stack_size . 8)(stack_size . 0)(conflicts . {Var tmp1 -> {Var tmp11; Var tmp12; Var tmp14; Var tmp16;
+                               Var tmp2; Var tmp21; Var tmp23; Var tmp24;
+                               Var tmp25; Var tmp26; Var tmp9; Reg r10; Reg r8;
+                               Reg r9; Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Var tmp10 -> {Var tmp2; Var tmp9; Reg rdi; Reg rsi};
+                  Var tmp11 -> {Var tmp1; Var tmp2; Var tmp9};
+                  Var tmp12 -> {Var tmp1; Var tmp2; Var tmp9};
+                  Var tmp14 -> {Var tmp1; Var tmp2; Var tmp9};
+                  Var tmp16 -> {Var tmp1; Var tmp2; Var tmp9};
+                  Var tmp19 -> {Var tmp2; Var tmp9; Reg rdi; Reg rsi};
+                  Var tmp2 -> {Var tmp1; Var tmp10; Var tmp11; Var tmp12;
+                               Var tmp14; Var tmp16; Var tmp19; Var tmp21;
+                               Var tmp23; Var tmp24; Var tmp25; Var tmp26;
+                               Var tmp9; Reg r10; Reg r12; Reg r13; Reg r14;
+                               Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                               Reg rdx; Reg rsi};
+                  Var tmp21 -> {Var tmp1; Var tmp9};
+                  Var tmp23 -> {Var tmp1; Var tmp2; Var tmp25; Var tmp26;
+                                Var tmp9};
+                  Var tmp24 -> {Var tmp1; Var tmp2; Var tmp25; Var tmp9};
+                  Var tmp25 -> {Var tmp1; Var tmp2; Var tmp23; Var tmp24;
+                                Var tmp9};
+                  Var tmp26 -> {Var tmp1; Var tmp2; Var tmp23; Var tmp9};
+                  Var tmp9 -> {Var tmp1; Var tmp10; Var tmp11; Var tmp12;
+                               Var tmp14; Var tmp16; Var tmp19; Var tmp2;
+                               Var tmp21; Var tmp23; Var tmp24; Var tmp25;
+                               Var tmp26; Reg r12; Reg r13; Reg r14; Reg rbx;
+                               Reg rdi};
+                  Reg r10 -> {Var tmp1; Var tmp2; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r12 -> {Var tmp2; Var tmp9; Reg r10; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r13 -> {Var tmp2; Var tmp9; Reg r10; Reg r12; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r14 -> {Var tmp2; Var tmp9; Reg r10; Reg r12; Reg r13;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r8 -> {Var tmp1; Var tmp2; Reg r10; Reg r12; Reg r13;
+                             Reg r14; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg r9 -> {Var tmp1; Var tmp2; Reg r10; Reg r12; Reg r13;
+                             Reg r14; Reg r8; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg rbx -> {Var tmp2; Var tmp9; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rcx -> {Var tmp1; Var tmp2; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rdi -> {Var tmp1; Var tmp10; Var tmp19; Var tmp2; Var tmp9;
+                              Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg r9;
+                              Reg rbx; Reg rcx; Reg rdx; Reg rsi};
+                  Reg rdx -> {Var tmp1; Var tmp2; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rsi};
+                  Reg rsi -> {Var tmp1; Var tmp10; Var tmp19; Var tmp2; Reg r10;
+                              Reg r12; Reg r13; Reg r14; Reg r8; Reg r9; Reg rbx;
+                              Reg rcx; Reg rdi; Reg rdx}})(moves . {Var tmp1 -> {Reg rdi}; Var tmp14 -> {Reg rax};
+              Var tmp16 -> {Reg rdi}; Var tmp19 -> {Reg rax};
+              Var tmp2 -> {Reg r11; Reg rsi}; Var tmp21 -> {Reg rdi};
+              Var tmp23 -> {Var tmp24}; Var tmp24 -> {Var tmp23};
+              Var tmp9 -> {Reg r11; Reg rax}; Reg r11 -> {Var tmp2; Var tmp9};
+              Reg r15 -> {Reg rdi}; Reg rax -> {Var tmp14; Var tmp19; Var tmp9};
+              Reg rdi -> {Var tmp1; Var tmp16; Var tmp21; Reg r15};
+              Reg rsi -> {Var tmp2}})) tmp0(start5 . (block ([{Var tmp1; Var tmp2; Reg r15}; {Var tmp1; Var tmp2; Var tmp24; Reg r15};
+      {Var tmp1; Var tmp2; Var tmp24; Var tmp25; Reg r15};
+      {Var tmp1; Var tmp2; Var tmp23; Var tmp25; Reg r15};
+      {Var tmp1; Var tmp2; Var tmp23; Reg r15};
+      {Var tmp1; Var tmp2; Var tmp23; Var tmp26; Reg r15};
+      {Var tmp1; Var tmp2; Reg r15}; {Var tmp1; Var tmp2; Reg r15};
+      {Var tmp1; Var tmp2; Reg r15}])
+    (movq (global-value free_ptr) (reg rdx))
+    (movq (int 24) (reg rcx))
+    (movq (reg rdx) (reg rdx))
+    (addq (reg rcx) (reg rdx))
+    (movq (global-value fromspace_end) (reg rcx))
+    (cmpq (reg rcx) (reg rdx))
     (jmp-if L block_t3)
     (jmp block_f4)))
-    (block_t3 . (block ()
+    (block_t3 . (block ([{Var tmp1; Var tmp2}; {Var tmp1; Var tmp2}])
     (jmp block_t1)))
-    (block_f2 . (block ()
+    (block_f4 . (block ([{Var tmp1; Var tmp2; Reg r15}; {Var tmp1; Var tmp2; Reg r15}])
+    (jmp block_f2)))
+    (block_t1 . (block ([{Var tmp1; Var tmp2}; {Var tmp1; Var tmp2}; {Var tmp1; Var tmp2}])
+    (movq (int 0) (reg rcx))
+    (jmp block_body0)))
+    (block_f2 . (block ([{Var tmp1; Var tmp2; Reg r15}; {Var tmp1; Var tmp2}; {Var tmp1; Var tmp2};
+      {Var tmp1; Var tmp2}; {Var tmp1; Var tmp2}])
     (movq (reg r15) (reg rdi))
     (movq (int 24) (reg rsi))
     (callq collect)
     (jmp block_body0)))
-    (block_body0 . (block ()
-    (movq (global-value free_ptr) (var tmp9))
+    (block_body0 . (block ([{Var tmp1; Var tmp2}; {Var tmp1; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp2; Var tmp9}; {Var tmp1; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp2; Var tmp9}; {Var tmp1; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp16; Var tmp2; Var tmp9}; {Var tmp1; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp2; Var tmp9; Reg rax};
+      {Var tmp1; Var tmp14; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp14; Var tmp2; Var tmp9}; {Var tmp1; Var tmp2; Var tmp9};
+      {Var tmp1; Var tmp2; Var tmp9}; {Var tmp1; Var tmp9};
+      {Var tmp1; Var tmp21; Var tmp9}; {Var tmp1; Var tmp9};
+      {Var tmp9; Reg rax; Reg rdi; Reg rsi};
+      {Var tmp19; Var tmp9; Reg rdi; Reg rsi};
+      {Var tmp19; Var tmp9; Reg rdi; Reg rsi}; {Var tmp9; Reg rdi; Reg rsi};
+      {Var tmp9; Reg rdi; Reg rsi}; {Reg rdi; Reg rsi}; {Reg rdi; Reg rsi}])
+    (movq (global-value free_ptr) (reg rbx))
     (addq (int 16) (global-value free_ptr))
-    (movq (var tmp9) (reg r11))
+    (movq (reg rbx) (reg r11))
     (movq (int 5) (deref r11 0))
-    (movq (var tmp2) (reg r11))
-    (movq (deref r11 8) (var tmp16))
-    (movq (var tmp16) (reg rdi))
-    (indirect-callq (var tmp15))
-    (movq (reg rax) (var tmp14))
-    (movq (var tmp9) (reg r11))
-    (movq (var tmp14) (deref r11 8))
-    (movq (int 0) (var tmp11))
-    (movq (var tmp2) (reg r11))
-    (movq (deref r11 16) (var tmp21))
-    (movq (var tmp21) (reg rdi))
-    (indirect-callq (var tmp20))
-    (movq (reg rax) (var tmp19))
-    (movq (var tmp9) (reg r11))
-    (movq (var tmp19) (deref r11 16))
-    (movq (int 0) (var tmp10))
-    (movq (var tmp9) (reg rax))
+    (movq (deref r15 -8) (reg r11))
+    (movq (deref r11 8) (reg rdx))
+    (movq (reg rdx) (reg rdi))
+    (indirect-callq (reg rdi))
+    (movq (reg rax) (reg rcx))
+    (movq (reg rbx) (reg r11))
+    (movq (reg rcx) (deref r11 8))
+    (movq (int 0) (reg rcx))
+    (movq (deref r15 -8) (reg r11))
+    (movq (deref r11 16) (reg rdx))
+    (movq (reg rdx) (reg rdi))
+    (indirect-callq (reg rdi))
+    (movq (reg rax) (reg rcx))
+    (movq (reg rbx) (reg r11))
+    (movq (reg rcx) (deref r11 16))
+    (movq (int 0) (reg rcx))
+    (movq (reg rbx) (reg rax))
     (jmp block_exit)))
-    (block_t1 . (block ()
-    (movq (int 0) (var tmp12))
-    (jmp block_body0)))
-    (block_f4 . (block ()
-    (jmp block_f2))))
-    (define ((locals . (tmp28 . Int))) tmp3(block_exit . (block ()
-    (movq (reg rdi) (var tmp4))
-    (retq)))
-    (start6 . (block ()
-    (movq (int 1) (var tmp28))
-    (movq (var tmp4) (reg rax))
-    (addq (var tmp28) (reg rax))
-    (jmp block_exit))))
+    (block_exit . (block ([{Reg rdi; Reg rsi}; {Reg rdi}; {}; {}])
+    (movq (reg rsi) (deref r15 -8))
+    (movq (reg rdi) (reg rdi))
+    (retq))))
+    (define ((locals . (tmp28 . Int)
+    (tmp4 . Int))(root_stack_size . 0)(stack_size . 0)(conflicts . {Var tmp28 -> {Var tmp4; Reg rdi}; Var tmp4 -> {Var tmp28};
+                  Reg r10 -> {Reg r12; Reg r13; Reg r14; Reg r8; Reg r9; Reg rbx;
+                              Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r12 -> {Reg r10; Reg r13; Reg r14; Reg r8; Reg r9; Reg rbx;
+                              Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r13 -> {Reg r10; Reg r12; Reg r14; Reg r8; Reg r9; Reg rbx;
+                              Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r14 -> {Reg r10; Reg r12; Reg r13; Reg r8; Reg r9; Reg rbx;
+                              Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r8 -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r9; Reg rbx;
+                             Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg r9 -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg rbx;
+                             Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg rbx -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg r9;
+                              Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg rcx -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg r9;
+                              Reg rbx; Reg rdi; Reg rdx; Reg rsi};
+                  Reg rdi -> {Var tmp28; Reg r10; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdx; Reg rsi};
+                  Reg rdx -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg r9;
+                              Reg rbx; Reg rcx; Reg rdi; Reg rsi};
+                  Reg rsi -> {Reg r10; Reg r12; Reg r13; Reg r14; Reg r8; Reg r9;
+                              Reg rbx; Reg rcx; Reg rdi; Reg rdx}})(moves . {Var tmp4 -> {Reg rax; Reg rdi}; Reg rax -> {Var tmp4};
+              Reg rdi -> {Var tmp4}})) tmp3(start6 . (block ([{Var tmp4; Reg rdi}; {Var tmp28; Var tmp4; Reg rdi};
+      {Var tmp28; Reg rax; Reg rdi}; {Reg rdi}; {Reg rdi}])
+    (movq (int 1) (reg rbx))
+    (movq (reg rdx) (reg rax))
+    (addq (reg rbx) (reg rax))
+    (jmp block_exit)))
+    (block_exit . (block ([{Reg rdi}; {}; {}])
+    (movq (reg rdi) (reg rdx))
+    (retq))))
     (define ((locals . (tmp29 . (Vector [Int; Int]))
     (tmp30 . (Fn ([(Fn ([Int], Int)); (Vector [Int; Int])], (Vector [Int; Int]))))
     (tmp31 . (Fn ([Int], Int)))(tmp34 . Int)(tmp36 . Int)(tmp37 . Int)
     (tmp38 . Int)(tmp39 . Int)(tmp40 . Int)(tmp5 . (Vector [Int; Int]))
     (tmp6 . Void)(tmp7 . Void)
-    (tmp8 . Void))) main(block_exit . (block ()
-    (retq)))
-    (start12 . (block ()
-    (leaq (fun-ref tmp0) (var tmp30))
-    (leaq (fun-ref tmp3) (var tmp31))
-    (movq (global-value free_ptr) (var tmp38))
-    (movq (int 24) (var tmp39))
-    (movq (var tmp38) (var tmp37))
-    (addq (var tmp39) (var tmp37))
-    (movq (global-value fromspace_end) (var tmp40))
-    (cmpq (var tmp40) (var tmp37))
+    (tmp8 . Void))(root_stack_size . 0)(stack_size . 0)(conflicts . {Var tmp29 -> {Var tmp30; Var tmp31; Var tmp34; Var tmp36;
+                                Var tmp37; Var tmp38; Var tmp39; Var tmp40;
+                                Var tmp6; Var tmp7; Var tmp8; Reg r12; Reg r13;
+                                Reg r14; Reg rbx};
+                  Var tmp30 -> {Var tmp34; Var tmp36; Var tmp37; Var tmp38;
+                                Var tmp39; Var tmp40; Var tmp5; Var tmp6;
+                                Var tmp7; Var tmp8; Reg r10; Reg r8; Reg r9;
+                                Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Var tmp31 -> {Var tmp34; Var tmp36; Var tmp37; Var tmp38;
+                                Var tmp39; Var tmp40; Var tmp5; Var tmp6;
+                                Var tmp7; Var tmp8; Reg r10; Reg r8; Reg r9;
+                                Reg rcx; Reg rdi; Reg rdx; Reg rsi};
+                  Var tmp34 -> {Var tmp30; Var tmp31; Var tmp5};
+                  Var tmp36 -> {Var tmp30; Var tmp31; Var tmp5};
+                  Var tmp37 -> {Var tmp30; Var tmp31; Var tmp39; Var tmp40;
+                                Var tmp5};
+                  Var tmp38 -> {Var tmp30; Var tmp31; Var tmp39; Var tmp5};
+                  Var tmp39 -> {Var tmp30; Var tmp31; Var tmp37; Var tmp38;
+                                Var tmp5};
+                  Var tmp40 -> {Var tmp30; Var tmp31; Var tmp37; Var tmp5};
+                  Var tmp5 -> {Var tmp30; Var tmp31; Var tmp34; Var tmp36;
+                               Var tmp37; Var tmp38; Var tmp39; Var tmp40;
+                               Var tmp6; Var tmp7; Var tmp8; Reg r12; Reg r13;
+                               Reg r14; Reg rbx};
+                  Var tmp6 -> {Var tmp30; Var tmp31; Var tmp5};
+                  Var tmp7 -> {Var tmp30; Var tmp31; Var tmp5};
+                  Var tmp8 -> {Var tmp30; Var tmp31};
+                  Reg r10 -> {Var tmp30; Var tmp31; Reg r12; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r12 -> {Var tmp29; Var tmp5; Reg r10; Reg r13; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r13 -> {Var tmp29; Var tmp5; Reg r10; Reg r12; Reg r14;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r14 -> {Var tmp29; Var tmp5; Reg r10; Reg r12; Reg r13;
+                              Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg r8 -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                             Reg r14; Reg r9; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg r9 -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                             Reg r14; Reg r8; Reg rbx; Reg rcx; Reg rdi; Reg rdx;
+                             Reg rsi};
+                  Reg rbx -> {Var tmp29; Var tmp5; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rcx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rcx -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rdi; Reg rdx;
+                              Reg rsi};
+                  Reg rdi -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdx;
+                              Reg rsi};
+                  Reg rdx -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rsi};
+                  Reg rsi -> {Var tmp30; Var tmp31; Reg r10; Reg r12; Reg r13;
+                              Reg r14; Reg r8; Reg r9; Reg rbx; Reg rcx; Reg rdi;
+                              Reg rdx}})(moves . {Var tmp29 -> {Reg r11; Reg rax}; Var tmp31 -> {Reg rdi};
+              Var tmp37 -> {Var tmp38}; Var tmp38 -> {Var tmp37};
+              Var tmp5 -> {Reg r11; Reg rsi}; Reg r11 -> {Var tmp29; Var tmp5};
+              Reg r15 -> {Reg rdi}; Reg rax -> {Var tmp29};
+              Reg rdi -> {Var tmp31; Reg r15}; Reg rsi -> {Var tmp5}})) main(start12 . (block ([{Var tmp30; Var tmp31; Reg r15}; {Var tmp30; Var tmp31; Reg r15};
+      {Var tmp30; Var tmp31; Reg r15};
+      {Var tmp30; Var tmp31; Var tmp38; Reg r15};
+      {Var tmp30; Var tmp31; Var tmp38; Var tmp39; Reg r15};
+      {Var tmp30; Var tmp31; Var tmp37; Var tmp39; Reg r15};
+      {Var tmp30; Var tmp31; Var tmp37; Reg r15};
+      {Var tmp30; Var tmp31; Var tmp37; Var tmp40; Reg r15};
+      {Var tmp30; Var tmp31; Reg r15}; {Var tmp30; Var tmp31; Reg r15};
+      {Var tmp30; Var tmp31; Reg r15}])
+    (leaq (fun-ref tmp0) (reg rdi))
+    (leaq (fun-ref tmp3) (reg rdi))
+    (movq (global-value free_ptr) (reg rdx))
+    (movq (int 24) (reg rcx))
+    (movq (reg rdx) (reg rdx))
+    (addq (reg rcx) (reg rdx))
+    (movq (global-value fromspace_end) (reg rcx))
+    (cmpq (reg rcx) (reg rdx))
     (jmp-if L block_t10)
     (jmp block_f11)))
-    (block_t10 . (block ()
+    (block_t10 . (block ([{Var tmp30; Var tmp31}; {Var tmp30; Var tmp31}])
     (jmp block_t8)))
-    (block_f9 . (block ()
+    (block_f11 . (block ([{Var tmp30; Var tmp31; Reg r15}; {Var tmp30; Var tmp31; Reg r15}])
+    (jmp block_f9)))
+    (block_t8 . (block ([{Var tmp30; Var tmp31}; {Var tmp30; Var tmp31}; {Var tmp30; Var tmp31}])
+    (movq (int 0) (reg rbx))
+    (jmp block_body7)))
+    (block_f9 . (block ([{Var tmp30; Var tmp31; Reg r15}; {Var tmp30; Var tmp31};
+      {Var tmp30; Var tmp31}; {Var tmp30; Var tmp31}; {Var tmp30; Var tmp31}])
     (movq (reg r15) (reg rdi))
     (movq (int 24) (reg rsi))
     (callq collect)
     (jmp block_body7)))
-    (block_body7 . (block ()
-    (movq (global-value free_ptr) (var tmp5))
+    (block_body7 . (block ([{Var tmp30; Var tmp31}; {Var tmp30; Var tmp31; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp5}; {Var tmp30; Var tmp31; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp34; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp34; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp5}; {Var tmp30; Var tmp31; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp36; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp36; Var tmp5};
+      {Var tmp30; Var tmp31; Var tmp5}; {Var tmp30; Var tmp31; Var tmp5};
+      {Var tmp30; Var tmp31}; {Var tmp30}; {Reg rax}; {Var tmp29}; {}; {}; {
+      }])
+    (movq (global-value free_ptr) (reg rbx))
     (addq (int 16) (global-value free_ptr))
-    (movq (var tmp5) (reg r11))
+    (movq (reg rbx) (reg r11))
     (movq (int 5) (deref r11 0))
-    (movq (int 0) (var tmp34))
-    (movq (var tmp5) (reg r11))
-    (movq (var tmp34) (deref r11 8))
-    (movq (int 0) (var tmp7))
-    (movq (int 41) (var tmp36))
-    (movq (var tmp5) (reg r11))
-    (movq (var tmp36) (deref r11 16))
-    (movq (int 0) (var tmp6))
-    (movq (var tmp32) (reg rsi))
-    (movq (var tmp31) (reg rdi))
-    (indirect-callq (var tmp30))
-    (movq (reg rax) (var tmp29))
-    (movq (var tmp29) (reg r11))
+    (movq (int 0) (reg rcx))
+    (movq (reg rbx) (reg r11))
+    (movq (reg rcx) (deref r11 8))
+    (movq (int 0) (reg rcx))
+    (movq (int 41) (reg rcx))
+    (movq (reg rbx) (reg r11))
+    (movq (reg rcx) (deref r11 16))
+    (movq (int 0) (reg rcx))
+    (movq (reg rbx) (reg rsi))
+    (movq (reg rdi) (reg rdi))
+    (indirect-callq (reg rdi))
+    (movq (reg rax) (reg rbx))
+    (movq (reg rbx) (reg r11))
     (movq (deref r11 16) (reg rax))
     (jmp block_exit)))
-    (block_t8 . (block ()
-    (movq (int 0) (var tmp8))
-    (jmp block_body7)))
-    (block_f11 . (block ()
-    (jmp block_f9))))
+    (block_exit . (block ([{}; {}])
+    (retq))))
     |}]
