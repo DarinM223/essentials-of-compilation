@@ -374,10 +374,7 @@ module BuildMoves (F : X86_0) : X86_0 with type 'a obs = 'a F.obs = struct
 end
 
 module AllocateRegistersPass (X86 : X86_0) = struct
-  module X_reader = struct
-    type t = unit
-    let init () = ()
-  end
+  module X_reader = Chapter1.UnitReader
 
   module IDelta = struct
     type _ eff += Rename : string -> 'a X86.arg eff

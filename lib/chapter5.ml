@@ -881,8 +881,8 @@ module X86_2_Pretty = struct
     program_helper info body
 end
 
-module X86_2_Printer = struct
-  include Chapter4.X86_1_Printer
+module X86_2_Printer_Helper (R : Chapter1.Reader) = struct
+  include Chapter4.X86_1_Printer_Helper (R)
 
   let global_value label = label ^ "(%rip)"
 
@@ -907,17 +907,20 @@ module X86_2_Printer = struct
     in
     Option.map add_root_stack (function_prologue_epilogue stack_size)
 
-  let program_helper stack_size root_stack_size blocks =
+  let program_helper init stack_size root_stack_size blocks =
     blocks
-    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block)
-    |> apply_header_footer (program_info stack_size root_stack_size)
+    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
+    |> apply_header_footer (program_info stack_size root_stack_size) init
 
   let program ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_
       blocks =
+    let init = R.init () in
     String.concat "\n"
     @@ [ ".global main"; ".text"; "main:" ]
-    @ program_helper stack_size root_stack_size blocks
+    @ program_helper init stack_size root_stack_size blocks
 end
+
+module X86_2_Printer = X86_2_Printer_Helper (Chapter1.UnitReader)
 
 module Ex0 (F : R3_Let) = struct
   open F

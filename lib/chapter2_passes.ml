@@ -308,16 +308,15 @@ module ListUtils = struct
     | [] -> a
 end
 
-module X86_0_Printer = struct
+module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
   type 'a reg = string
   type 'a arg = string
-  type 'a instr = string
-  type 'a block = string list
+  type 'a instr = R.t -> string
+  type 'a block = R.t -> string list
   type 'a program = string
   type label = string
-  type block_info = string
-  type program_info = (string list * string) option
   type 'a obs = string
+
   let rsp = "%rsp"
   let rbp = "%rbp"
   let rax = "%rax"
@@ -342,14 +341,14 @@ module X86_0_Printer = struct
   let int i = "$" ^ string_of_int i
   let var v = failwith @@ "Invalid var in X86Printer: " ^ v
 
-  let addq a b = "addq " ^ a ^ ", " ^ b
-  let subq a b = "subq " ^ a ^ ", " ^ b
-  let movq a b = "movq " ^ a ^ ", " ^ b
-  let retq = "retq"
-  let negq a = "negq " ^ a
-  let callq l = "callq " ^ l
-  let pushq a = "pushq " ^ a
-  let popq a = "popq " ^ a
+  let addq a b _ = "addq " ^ a ^ ", " ^ b
+  let subq a b _ = "subq " ^ a ^ ", " ^ b
+  let movq a b _ = "movq " ^ a ^ ", " ^ b
+  let retq _ = "retq"
+  let negq a _ = "negq " ^ a
+  let callq l _ = "callq " ^ l
+  let pushq a _ = "pushq " ^ a
+  let popq a _ = "popq " ^ a
 
   let function_prologue_epilogue stack_size =
     Option.map
@@ -371,27 +370,33 @@ module X86_0_Printer = struct
 
   let indent s = "  " ^ s
 
-  let block ?live_after:_ = List.map indent
+  let block ?live_after:_ instrs r =
+    instrs |> List.map (fun f -> f r) |> List.map indent
 
-  let apply_header_footer info instrs =
+  let apply_header_footer info r instrs =
     match info with
     | Some (header, footer) ->
+      let header = List.map (fun f -> f r) header in
+      let footer = List.map (fun f -> f r) footer in
       ListUtils.add_before_end (List.map indent footer)
         (List.map indent header @ instrs)
     | None -> instrs
 
-  let program_helper stack_size blocks =
+  let program_helper init stack_size blocks =
     blocks
-    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block)
-    |> apply_header_footer (function_prologue_epilogue stack_size)
+    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
+    |> apply_header_footer (function_prologue_epilogue stack_size) init
 
   let program ?stack_size ?conflicts:_ ?moves:_ blocks =
+    let init = R.init () in
     String.concat "\n"
     @@ [ ".global main"; ".text"; "main:" ]
-    @ program_helper stack_size blocks
+    @ program_helper init stack_size blocks
 
   let observe s = s
 end
+
+module X86_0_Printer = X86_0_Printer_Helper (Chapter1.UnitReader)
 
 module Ex4 (F : R1) = struct
   open F

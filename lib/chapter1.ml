@@ -62,6 +62,11 @@ module type Reader = sig
   val init : unit -> t (* Initial state *)
 end
 
+module UnitReader = struct
+  type t = unit
+  let init () = ()
+end
+
 module R0_R_T (R : Reader) (F : R0) :
   R0
     with type 'a exp = R.t -> 'a F.exp

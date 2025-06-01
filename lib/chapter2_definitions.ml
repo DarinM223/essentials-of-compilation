@@ -51,10 +51,7 @@ module R1_R_T (R : Chapter1.Reader) (F : R1) = struct
 end
 
 module TransformLetPass (F : R1) = struct
-  module R = struct
-    type t = unit
-    let init () = ()
-  end
+  module R = Chapter1.UnitReader
   module IDelta = struct
     let ( let* ) e f r =
       let e = e r in
@@ -470,8 +467,6 @@ module X86_0_Pretty = struct
   type 'a block = string
   type 'a program = string
   type label = string
-  type block_info = string
-  type program_info = string
   type 'a obs = string
   let rsp = "rsp"
   let rbp = "rbp"

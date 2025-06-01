@@ -256,8 +256,8 @@ module X86_1_Pretty = struct
   let label l = "(label " ^ l ^ ")"
 end
 
-module X86_1_Printer = struct
-  include Chapter2_passes.X86_0_Printer
+module X86_1_Printer_Helper (R : Chapter1.Reader) = struct
+  include Chapter2_passes.X86_0_Printer_Helper (R)
 
   let byte_reg = function
     | "%rsp" -> "%spl"
@@ -278,10 +278,10 @@ module X86_1_Printer = struct
     | "%r15" -> "%r15b"
     | _ -> failwith "Unknown register"
 
-  let xorq a b = "xorq " ^ a ^ ", " ^ b
-  let cmpq a b = "cmpq " ^ a ^ ", " ^ b
+  let xorq a b _ = "xorq " ^ a ^ ", " ^ b
+  let cmpq a b _ = "cmpq " ^ a ^ ", " ^ b
 
-  let set cc a =
+  let set cc a _ =
     let set_instr =
       match cc with
       | CC.E -> "sete"
@@ -291,9 +291,9 @@ module X86_1_Printer = struct
       | CC.Le -> "setle"
     in
     set_instr ^ " " ^ a
-  let movzbq a b = "movzbq " ^ a ^ ", " ^ b
-  let jmp l = "jmp " ^ l
-  let jmp_if cc l =
+  let movzbq a b _ = "movzbq " ^ a ^ ", " ^ b
+  let jmp l _ = "jmp " ^ l
+  let jmp_if cc l _ =
     let jmp_instr =
       match cc with
       | CC.E -> "je"
@@ -303,8 +303,10 @@ module X86_1_Printer = struct
       | CC.Le -> "jle"
     in
     jmp_instr ^ " " ^ l
-  let label l = l ^ ":"
+  let label l _ = l ^ ":"
 end
+
+module X86_1_Printer = X86_1_Printer_Helper (Chapter1.UnitReader)
 
 module TransformLet (F : R2) : R2_Let with type 'a obs = 'a F.obs = struct
   module M = Chapter2_definitions.TransformLetPass (F)
