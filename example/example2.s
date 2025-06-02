@@ -10,10 +10,10 @@ main:
   subq $0, %rsp
 start:
 
-  movq $5, %rcx
-  movq $6, %rdx
-  movq $5, %rbx
-  cmpq %rbx, %rcx
+  movq $5, %rdx
+  movq $6, %rdi
+  movq $5, %rsi
+  cmpq %rsi, %rdx
   jl block_t6
   jmp block_f13
 block_t6:
@@ -21,20 +21,20 @@ block_t6:
   jmp block_f5
 block_f13:
 
-  movq $7, %rbx
-  cmpq %rbx, %rdx
+  movq $7, %rsi
+  cmpq %rsi, %rdi
   je block_t9
   jmp block_f12
 block_t9:
 
-  movq $1, %rbx
-  cmpq $0, %rbx
+  movq $1, %rsi
+  cmpq $0, %rsi
   je block_f8
   jmp block_t7
 block_f12:
 
-  movq $6, %rbx
-  cmpq %rbx, %rdx
+  movq $6, %rsi
+  cmpq %rsi, %rdi
   je block_t10
   jmp block_f11
 block_t7:
@@ -51,18 +51,18 @@ block_f11:
   jmp block_f5
 block_t0:
 
-  movq $10, %rcx
-  movq $1, %rbx
-  movq %rbx, %rdx
-  negq %rdx
-  movq %rcx, %rbx
-  addq %rdx, %rbx
-  movq %rbx, %rax
-  addq %rcx, %rax
+  movq $10, %rdx
+  movq $1, %rsi
+  movq %rsi, %rdi
+  negq %rdi
+  movq %rdx, %rsi
+  addq %rdi, %rsi
+  movq %rsi, %rax
+  addq %rdx, %rax
   jmp block_exit
 block_f5:
 
-  cmpq %rdx, %rcx
+  cmpq %rdi, %rdx
   jl block_t3
   jmp block_f4
 block_t3:
@@ -73,15 +73,15 @@ block_f4:
   jmp block_f2
 block_t1:
 
-  movq %rcx, %rax
-  addq %rdx, %rax
+  movq %rdx, %rax
+  addq %rdi, %rax
   jmp block_exit
 block_f2:
 
-  movq %rdx, %rbx
-  negq %rbx
-  movq %rcx, %rax
-  addq %rbx, %rax
+  movq %rdi, %rsi
+  negq %rsi
+  movq %rdx, %rax
+  addq %rsi, %rax
   jmp block_exit
 block_exit:
 

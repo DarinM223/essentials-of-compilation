@@ -398,9 +398,6 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       in
       X86.deref reg slot
 
-    let regs =
-      X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r11; r12; r13; r14; r15 |]
-
     let reg_of_color stack_size color_slot_table regs color =
       if color < Array.length regs then
         X86.reg regs.(color)
@@ -420,13 +417,15 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
-      (* TODO: add this once the expectation test changes are verified *)
-      (* Array.sort
+      let regs =
+        X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r11; r12; r13; r14; r15 |]
+      in
+      Array.sort
         (fun a b ->
           Int.compare
             (ArgMap.find (arg_of_reg a) colors)
             (ArgMap.find (arg_of_reg b) colors))
-        regs; *)
+        regs;
       let get_arg v =
         reg_of_color stack_size color_slot_table regs (ArgMap.find_var v colors)
       in
@@ -582,18 +581,18 @@ let%expect_test "Example 1 after allocate registers" =
       subq $0, %rsp
     start:
 
-      movq $1, %rbx
-      movq $46, %rdx
-      movq %rbx, %rbx
-      addq $7, %rbx
-      movq %rbx, %rcx
-      addq $4, %rcx
-      movq %rbx, %rbx
-      addq %rdx, %rbx
-      movq %rcx, %rcx
-      negq %rcx
-      movq %rbx, %rax
-      addq %rcx, %rax
+      movq $1, %rsi
+      movq $46, %rdi
+      movq %rsi, %rsi
+      addq $7, %rsi
+      movq %rsi, %rdx
+      addq $4, %rdx
+      movq %rsi, %rsi
+      addq %rdi, %rsi
+      movq %rdx, %rdx
+      negq %rdx
+      movq %rsi, %rax
+      addq %rdx, %rax
       popq %r14
       popq %r13
       popq %rbx
@@ -624,18 +623,18 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
       subq $0, %rsp
     start:
 
-      movq $1, %rbx
-      movq $46, %rdx
-      movq %rbx, %rbx
-      addq $7, %rbx
-      movq %rbx, %rcx
-      addq $4, %rcx
-      movq %rbx, %rbx
-      addq %rdx, %rbx
-      movq %rcx, %rcx
-      negq %rcx
-      movq %rbx, %rax
-      addq %rcx, %rax
+      movq $1, %rsi
+      movq $46, %rdi
+      movq %rsi, %rsi
+      addq $7, %rsi
+      movq %rsi, %rdx
+      addq $4, %rdx
+      movq %rsi, %rsi
+      addq %rdi, %rsi
+      movq %rdx, %rdx
+      negq %rdx
+      movq %rsi, %rax
+      addq %rdx, %rax
       popq %r14
       popq %r13
       popq %rbx
@@ -669,15 +668,15 @@ let%expect_test
       subq $0, %rsp
     start:
 
-      movq $1, %rbx
-      movq $46, %rdx
-      addq $7, %rbx
-      movq %rbx, %rcx
-      addq $4, %rcx
-      addq %rdx, %rbx
-      negq %rcx
-      movq %rbx, %rax
-      addq %rcx, %rax
+      movq $1, %rsi
+      movq $46, %rdi
+      addq $7, %rsi
+      movq %rsi, %rdx
+      addq $4, %rdx
+      addq %rdi, %rsi
+      negq %rdx
+      movq %rsi, %rax
+      addq %rdx, %rax
       popq %r14
       popq %r13
       popq %rbx

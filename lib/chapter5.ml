@@ -735,7 +735,6 @@ module AllocateRegistersPass (X86 : X86_2) = struct
   module IDelta = struct
     include IDelta
     open Chapter2_definitions
-    let regs = X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r12; r13; r14 |]
     let reg_of_color root_stack_size stack_size color_slot_table regs typ color
         =
       if color < Array.length regs then
@@ -764,6 +763,9 @@ module AllocateRegistersPass (X86 : X86_2) = struct
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
+      let regs =
+        X86.[| rbx; rcx; rdx; rsi; rdi; r8; r9; r10; r12; r13; r14 |]
+      in
       Array.sort
         (fun a b ->
           Int.compare
