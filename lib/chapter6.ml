@@ -892,11 +892,15 @@ module SelectInstructions (F : C3) (X86 : X86_3) :
       X86.[ jmp t; jmp_if E f; cmpq (int 0) (reg rax); indirect_callq fn ]
       @ pass_params ps
 
-  let tailcall (_, f) ps = X86.tail_jmp f :: pass_params ps
+  let tailcall (_, f) ps _ = X86.tail_jmp f :: pass_params ps
 
   let define ?(locals = []) v vs body =
     let locals = StringMap.of_list locals in
-    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_label = fresh_exit_label () in
+    let body =
+      List.map (fun (l, t) -> (l, X86.block (List.rev (t exit_label)))) body
+    in
+    (* FIXME: this is extracting the params in the exit block, not the start block *)
     let exit_block =
       (exit_label, X86.block (List.rev (X86.retq :: extract_params vs)))
     in
@@ -942,6 +946,26 @@ module BuildInterferencePass (X86 : X86_3) = struct
   end)
   module IDelta = struct
     include IDelta
+    let leaq (_, a) (dest, b) =
+      match dest with
+      | Some dest -> (arith dest, X86.leaq a b)
+      | None -> X_instr.fwd @@ X86.leaq a b
+    let indirect_callq (_, arg) =
+      let acc_graph live_after graph =
+        let edges =
+          let ( let* ) a f = List.concat_map f a in
+          let* r = caller_saves in
+          let* v = ArgSet.to_list live_after in
+          if v <> arg_of_reg r then
+            [ (arg_of_reg r, v) ]
+          else
+            []
+        in
+        List.fold_left
+          (fun graph (k, v) -> Chapter3.GraphUtils.add_interference k v graph)
+          graph edges
+      in
+      (acc_graph, X86.indirect_callq arg)
     let define ?(locals = StringMap.empty) ?stack_size ?root_stack_size
         ?conflicts:_ ?moves v blocks =
       let interference_graph = build_interference_graph locals blocks in
@@ -1149,13 +1173,33 @@ module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
       String.concat "\n" (footer @ [ instr ])
     | None -> instr
   let leaq a b _ = "leaq " ^ a ^ ", " ^ b
+
+  let function_info stack_size root_stack_size =
+    let add_root_stack (header, footer) =
+      match root_stack_size with
+      | Some stack_size ->
+        ( header @ [ addq (int stack_size) r15 ],
+          footer @ [ subq (int stack_size) r15 ] )
+      | None -> (header, footer)
+    in
+    Option.map add_root_stack (function_prologue_epilogue stack_size)
+
+  let function_helper init stack_size root_stack_size blocks =
+    blocks
+    |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
+    |> apply_header_footer (function_info stack_size root_stack_size) init
+
   let define ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_ v
       blocks =
     let init = X86_Info.{ stack_size; root_stack_size } in
     String.concat "\n"
-      ((v ^ ":\n") :: program_helper init stack_size root_stack_size blocks)
-  let program defs =
-    String.concat "\n" @@ [ ".global main"; ".text"; "main:" ] @ defs
+      ((v ^ ":\n")
+      ::
+      (if v = "main" then
+         program_helper init stack_size root_stack_size blocks
+       else
+         function_helper init stack_size root_stack_size blocks))
+  let program defs = String.concat "\n" @@ [ ".global main"; ".text" ] @ defs
 end
 
 module X86_3_Printer = X86_3_Printer_Helper (X86_Info)
@@ -1371,7 +1415,6 @@ let%expect_test
     {|
     Ex1: .global main
     .text
-    main:
     tmp0:
 
       pushq %rbp
@@ -1381,19 +1424,14 @@ let%expect_test
       pushq %r13
       pushq %r14
       subq $0, %rsp
-      movq $16384, %rdi
-      movq $16, %rsi
-      callq initialize
-      movq rootstack_begin(%rip), %r15
-      movq $0, (%r15)
-      addq $8, %r15
+      addq $16, %r15
     start5:
 
       movq free_ptr(%rip), %rdx
-      movq $24, %rcx
-      addq %rcx, %rdx
-      movq fromspace_end(%rip), %rcx
-      cmpq %rcx, %rdx
+      movq $24, %rsi
+      addq %rsi, %rdx
+      movq fromspace_end(%rip), %rsi
+      cmpq %rsi, %rdx
       jl block_t3
       jmp block_f4
     block_t3:
@@ -1404,7 +1442,7 @@ let%expect_test
       jmp block_f2
     block_t1:
 
-      movq $0, %rcx
+      movq $0, %rsi
       jmp block_body0
     block_f2:
 
@@ -1414,38 +1452,38 @@ let%expect_test
       jmp block_body0
     block_body0:
 
-      movq free_ptr(%rip), %rbx
+      movq free_ptr(%rip), %rax
+      movq %rax, -8(%r15)
       addq $16, free_ptr(%rip)
-      movq %rbx, %r11
+      movq -8(%r15), %r11
       movq $5, (%r11)
+      movq -16(%r15), %r11
+      movq 8(%r11), %rdi
+      callq *%rbx
+      movq %rax, %rsi
       movq -8(%r15), %r11
-      movq 8(%r11), %rdx
-      movq %rdx, %rdi
-      callq *%rdi
-      movq %rax, %rcx
-      movq %rbx, %r11
-      movq %rcx, 8(%r11)
-      movq $0, %rcx
+      movq %rsi, 8(%r11)
+      movq $0, %rsi
+      movq -16(%r15), %r11
+      movq 16(%r11), %rdi
+      callq *%rbx
+      movq %rax, %rdx
       movq -8(%r15), %r11
-      movq 16(%r11), %rdx
-      movq %rdx, %rdi
-      callq *%rdi
-      movq %rax, %rcx
-      movq %rbx, %r11
-      movq %rcx, 16(%r11)
-      movq $0, %rcx
-      movq %rbx, %rax
+      movq %rdx, 16(%r11)
+      movq $0, %rdx
+      movq -8(%r15), %rax
       jmp block_exit
     block_exit:
 
-      movq %rsi, -8(%r15)
+      movq %rsi, -16(%r15)
+      movq %rdi, %rbx
       popq %r14
       popq %r13
       popq %rbx
       popq %r12
       movq %rbp, %rsp
       popq %rbp
-      subq $8, %r15
+      subq $16, %r15
       retq
     tmp3:
 
@@ -1456,21 +1494,15 @@ let%expect_test
       pushq %r13
       pushq %r14
       subq $0, %rsp
-      movq $16384, %rdi
-      movq $16, %rsi
-      callq initialize
-      movq rootstack_begin(%rip), %r15
-      movq $0, (%r15)
       addq $0, %r15
     start6:
 
-      movq $1, %rbx
-      movq %rdx, %rax
-      addq %rbx, %rax
-      jmp block_exit
-    block_exit:
+      movq $1, %rsi
+      movq %rdi, %rax
+      addq %rsi, %rax
+      jmp block_exit1
+    block_exit1:
 
-      movq %rdi, %rdx
       popq %r14
       popq %r13
       popq %rbx
@@ -1496,13 +1528,13 @@ let%expect_test
       addq $0, %r15
     start12:
 
-      leaq tmp0(%rip), %rdi
-      leaq tmp3(%rip), %rdi
-      movq free_ptr(%rip), %rdx
-      movq $24, %rcx
-      addq %rcx, %rdx
-      movq fromspace_end(%rip), %rcx
-      cmpq %rcx, %rdx
+      leaq tmp0(%rip), %r14
+      leaq tmp3(%rip), %rbx
+      movq free_ptr(%rip), %rdi
+      movq $24, %rdx
+      addq %rdx, %rdi
+      movq fromspace_end(%rip), %rdx
+      cmpq %rdx, %rdi
       jl block_t10
       jmp block_f11
     block_t10:
@@ -1513,7 +1545,7 @@ let%expect_test
       jmp block_f9
     block_t8:
 
-      movq $0, %rbx
+      movq $0, %rsi
       jmp block_body7
     block_f9:
 
@@ -1523,25 +1555,25 @@ let%expect_test
       jmp block_body7
     block_body7:
 
-      movq free_ptr(%rip), %rbx
+      movq free_ptr(%rip), %rsi
       addq $16, free_ptr(%rip)
-      movq %rbx, %r11
+      movq %rsi, %r11
       movq $5, (%r11)
-      movq $0, %rcx
-      movq %rbx, %r11
-      movq %rcx, 8(%r11)
-      movq $0, %rcx
-      movq $41, %rcx
-      movq %rbx, %r11
-      movq %rcx, 16(%r11)
-      movq $0, %rcx
-      movq %rbx, %rsi
-      callq *%rdi
-      movq %rax, %rbx
-      movq %rbx, %r11
+      movq $0, %rdx
+      movq %rsi, %r11
+      movq %rdx, 8(%r11)
+      movq $0, %rdx
+      movq $41, %rdx
+      movq %rsi, %r11
+      movq %rdx, 16(%r11)
+      movq $0, %rdx
+      movq %rbx, %rdi
+      callq *%r14
+      movq %rax, %rsi
+      movq %rsi, %r11
       movq 16(%r11), %rax
-      jmp block_exit
-    block_exit:
+      jmp block_exit2
+    block_exit2:
 
       popq %r14
       popq %r13

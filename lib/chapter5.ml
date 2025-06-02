@@ -629,12 +629,15 @@ module SelectInstructions (F : C2) (X86 : X86_2) = struct
     | Assign v -> X86.[ movq (global_value name) (var v) ]
     | Return -> X86.[ movq (global_value name) (reg rax) ]
     | If (t, f) -> X86.[ jmp t; jmp_if E f; cmpq (int 0) (global_value name) ]
-  let collect i =
+  let collect i _ =
     X86.[ callq "collect"; movq (int i) (reg rsi); movq (reg r15) (reg rdi) ]
   let void = arg (int 0)
   let program ?(locals = []) body =
     let locals = StringMap.of_list locals in
-    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_label = fresh_exit_label () in
+    let body =
+      List.map (fun (l, t) -> (l, X86.block (List.rev (t exit_label)))) body
+    in
     let exit_block = (exit_label, X86.(block [ retq ])) in
     X86.program ~locals (exit_block :: body)
 end
@@ -761,6 +764,12 @@ module AllocateRegistersPass (X86 : X86_2) = struct
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
+      Array.sort
+        (fun a b ->
+          Int.compare
+            (ArgMap.find (arg_of_reg a) colors)
+            (ArgMap.find (arg_of_reg b) colors))
+        regs;
       let get_arg v =
         let color = ArgMap.find_var v colors in
         let typ =
@@ -1105,11 +1114,11 @@ let%expect_test "Ex2 allocate registers" =
       addq $8, %r15
     start:
 
-      movq free_ptr(%rip), %rcx
-      movq $24, %rbx
-      addq %rbx, %rcx
-      movq fromspace_end(%rip), %rbx
-      cmpq %rbx, %rcx
+      movq free_ptr(%rip), %rdx
+      movq $24, %rsi
+      addq %rsi, %rdx
+      movq fromspace_end(%rip), %rsi
+      cmpq %rsi, %rdx
       jl block_t8
       jmp block_f9
     block_t8:
@@ -1120,7 +1129,7 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_f7
     block_t6:
 
-      movq $0, %rbx
+      movq $0, %rsi
       jmp block_body5
     block_f7:
 
@@ -1135,11 +1144,11 @@ let%expect_test "Ex2 allocate registers" =
       addq $16, free_ptr(%rip)
       movq -8(%r15), %r11
       movq $131, (%r11)
-      movq free_ptr(%rip), %rcx
-      movq $16, %rbx
-      addq %rbx, %rcx
-      movq fromspace_end(%rip), %rbx
-      cmpq %rbx, %rcx
+      movq free_ptr(%rip), %rdx
+      movq $16, %rsi
+      addq %rsi, %rdx
+      movq fromspace_end(%rip), %rsi
+      cmpq %rsi, %rdx
       jl block_t3
       jmp block_f4
     block_t3:
@@ -1150,7 +1159,7 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_f2
     block_t1:
 
-      movq $0, %rbx
+      movq $0, %rsi
       jmp block_body0
     block_f2:
 
@@ -1160,20 +1169,20 @@ let%expect_test "Ex2 allocate registers" =
       jmp block_body0
     block_body0:
 
-      movq free_ptr(%rip), %rbx
+      movq free_ptr(%rip), %rsi
       addq $16, free_ptr(%rip)
-      movq %rbx, %r11
+      movq %rsi, %r11
       movq $3, (%r11)
-      movq $42, %rcx
-      movq %rbx, %r11
-      movq %rcx, 8(%r11)
-      movq $0, %rcx
+      movq $42, %rdx
+      movq %rsi, %r11
+      movq %rdx, 8(%r11)
+      movq $0, %rdx
       movq -8(%r15), %r11
-      movq %rbx, 8(%r11)
-      movq $0, %rbx
+      movq %rsi, 8(%r11)
+      movq $0, %rsi
       movq -8(%r15), %r11
-      movq 8(%r11), %rbx
-      movq %rbx, %r11
+      movq 8(%r11), %rsi
+      movq %rsi, %r11
       movq 8(%r11), %rax
       jmp block_exit
     block_exit:

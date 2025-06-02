@@ -145,9 +145,10 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
     | Assign of string
     | Return
     | If of F.label * F.label
+  type info = string (* block exit label *)
   type 'a exp = ctx -> unit X86.instr list
-  type 'a stmt = unit X86.instr list
-  type 'a tail = unit X86.instr list
+  type 'a stmt = info -> unit X86.instr list
+  type 'a tail = info -> unit X86.instr list
   type 'a program = unit X86.program
   type var = string
   type label = F.label
@@ -181,14 +182,14 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
     | Return -> X86.[ addq arg2 (reg rax); movq arg1 (reg rax) ]
     | If _ -> failwith "(+) cannot be a condition of if"
 
-  let assign v e = e (Assign v)
+  let assign v e _ = e (Assign v)
 
-  let return e = X86.retq :: e Return
+  let return e _ = X86.retq :: e Return
 
-  let ( @> ) stmts1 stmts2 = stmts2 @ stmts1
+  let ( @> ) stmts1 stmts2 r = stmts2 r @ stmts1 r
 
   let program ?locals:_ body =
-    X86.(program (List.map (fun (l, t) -> (l, block (List.rev t))) body))
+    X86.(program (List.map (fun (l, t) -> (l, block (List.rev (t "")))) body))
 
   type 'a obs = unit X86.obs
   let observe = X86.observe

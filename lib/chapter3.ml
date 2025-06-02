@@ -127,13 +127,20 @@ module GraphUtils = struct
     let color_table = ArgTable.create (List.length vars) in
     let module Elem = struct
       type t = Arg.t
-      let compare a b =
+      let compare_by_saturation a b =
         let a_saturation = IntSet.cardinal (saturation color_table graph a) in
         let b_saturation = IntSet.cardinal (saturation color_table graph b) in
         if a_saturation = b_saturation then
           Arg.compare a b
         else
           Int.compare a_saturation b_saturation
+
+      let compare a b =
+        match (a, b) with
+        | Arg.Reg _, Arg.Reg _ -> compare_by_saturation a b
+        | Arg.Var _, Arg.Var _ -> compare_by_saturation a b
+        | Arg.Reg _, Arg.Var _ -> Arg.compare a b
+        | Arg.Var _, Arg.Reg _ -> Arg.compare a b
     end in
     let module Worklist = Set.Make (Elem) in
     let rec go worklist =
@@ -413,6 +420,13 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       in
       let vars = ArgMap.keys conflicts in
       let colors = GraphUtils.color_graph moves conflicts vars in
+      (* TODO: add this once the expectation test changes are verified *)
+      (* Array.sort
+        (fun a b ->
+          Int.compare
+            (ArgMap.find (arg_of_reg a) colors)
+            (ArgMap.find (arg_of_reg b) colors))
+        regs; *)
       let get_arg v =
         reg_of_color stack_size color_slot_table regs (ArgMap.find_var v colors)
       in

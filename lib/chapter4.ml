@@ -424,8 +424,7 @@ end
 module SelectInstructions (F : C1) (X86 : X86_1) = struct
   include Chapter2_passes.SelectInstructions (F) (X86)
 
-  let exit_label = "block_exit"
-  let return e = X86.jmp exit_label :: e Return
+  let return e exit_label = X86.jmp exit_label :: e Return
   let t = (None, X86.int 1)
   let f = (None, X86.int 0)
 
@@ -463,10 +462,22 @@ module SelectInstructions (F : C1) (X86 : X86_1) = struct
           movzbq (byte_reg rax) (reg rax); set L (byte_reg rax); cmpq arg2 arg1;
         ]
     | If (t, f) -> X86.[ jmp f; jmp_if L t; cmpq arg2 arg1 ]
-  let goto label = [ X86.jmp label ]
-  let if_ cond t_label f_label = cond (If (t_label, f_label))
+  let goto label _ = [ X86.jmp label ]
+  let if_ cond t_label f_label _ = cond (If (t_label, f_label))
+
+  let fresh_exit_label =
+    let c = ref (-1) in
+    fun () ->
+      incr c;
+      if Int.equal !c 0 then
+        "block_exit"
+      else
+        "block_exit" ^ string_of_int !c
   let program ?locals:_ body =
-    let body = List.map (fun (l, t) -> (l, X86.block (List.rev t))) body in
+    let exit_label = fresh_exit_label () in
+    let body =
+      List.map (fun (l, t) -> (l, X86.block (List.rev (t exit_label)))) body
+    in
     let exit_block = (exit_label, X86.(block [ retq ])) in
     X86.program (exit_block :: body)
 end
