@@ -871,13 +871,12 @@ module SelectInstructions (F : C3) (X86 : X86_3) :
       in
       go 0 l
   let extract_params vs =
-    let rec go =
-     fun i -> function
-       | x :: xs ->
-         X86.(movq (reg call_conv.(i)) (var x)) :: go (Stdlib.( + ) i 1) xs
-       | [] -> []
+    let rec go i acc = function
+      | x :: xs ->
+        go (Stdlib.( + ) i 1) (X86.(movq (reg call_conv.(i)) (var x)) :: acc) xs
+      | [] -> acc
     in
-    go 0 vs
+    go 0 [] vs
 
   let fun_ref l = function
     | Assign v -> X86.[ leaq (fun_ref l) (var v) ]
@@ -897,13 +896,15 @@ module SelectInstructions (F : C3) (X86 : X86_3) :
   let define ?(locals = []) v vs body =
     let locals = StringMap.of_list locals in
     let exit_label = fresh_exit_label () in
+    let header l =
+      if String.starts_with ~prefix:"start" l then extract_params vs else []
+    in
     let body =
-      List.map (fun (l, t) -> (l, X86.block (List.rev (t exit_label)))) body
+      List.map
+        (fun (l, t) -> (l, X86.block (List.rev (t exit_label @ header l))))
+        body
     in
-    (* FIXME: this is extracting the params in the exit block, not the start block *)
-    let exit_block =
-      (exit_label, X86.block (List.rev (X86.retq :: extract_params vs)))
-    in
+    let exit_block = (exit_label, X86.(block [ retq ])) in
     X86.define ~locals v (exit_block :: body)
 
   let program = X86.program
@@ -1427,6 +1428,8 @@ let%expect_test
       addq $16, %r15
     start5:
 
+      movq %rdi, %rbx
+      movq %rsi, -8(%r15)
       movq free_ptr(%rip), %rdx
       movq $24, %rsi
       addq %rsi, %rdx
@@ -1453,30 +1456,28 @@ let%expect_test
     block_body0:
 
       movq free_ptr(%rip), %rax
-      movq %rax, -8(%r15)
+      movq %rax, -16(%r15)
       addq $16, free_ptr(%rip)
-      movq -8(%r15), %r11
-      movq $5, (%r11)
       movq -16(%r15), %r11
+      movq $5, (%r11)
+      movq -8(%r15), %r11
       movq 8(%r11), %rdi
       callq *%rbx
       movq %rax, %rsi
-      movq -8(%r15), %r11
+      movq -16(%r15), %r11
       movq %rsi, 8(%r11)
       movq $0, %rsi
-      movq -16(%r15), %r11
+      movq -8(%r15), %r11
       movq 16(%r11), %rdi
       callq *%rbx
-      movq %rax, %rdx
-      movq -8(%r15), %r11
-      movq %rdx, 16(%r11)
-      movq $0, %rdx
-      movq -8(%r15), %rax
+      movq %rax, %rsi
+      movq -16(%r15), %r11
+      movq %rsi, 16(%r11)
+      movq $0, %rsi
+      movq -16(%r15), %rax
       jmp block_exit
     block_exit:
 
-      movq %rsi, -16(%r15)
-      movq %rdi, %rbx
       popq %r14
       popq %r13
       popq %rbx

@@ -12,6 +12,8 @@ tmp0:
   addq $16, %r15
 start5:
 
+  movq %rdi, %rbx
+  movq %rsi, -8(%r15)
   movq free_ptr(%rip), %rdx
   movq $24, %rsi
   addq %rsi, %rdx
@@ -38,30 +40,28 @@ block_f2:
 block_body0:
 
   movq free_ptr(%rip), %rax
-  movq %rax, -8(%r15)
+  movq %rax, -16(%r15)
   addq $16, free_ptr(%rip)
-  movq -8(%r15), %r11
-  movq $5, (%r11)
   movq -16(%r15), %r11
+  movq $5, (%r11)
+  movq -8(%r15), %r11
   movq 8(%r11), %rdi
   callq *%rbx
   movq %rax, %rsi
-  movq -8(%r15), %r11
+  movq -16(%r15), %r11
   movq %rsi, 8(%r11)
   movq $0, %rsi
-  movq -16(%r15), %r11
+  movq -8(%r15), %r11
   movq 16(%r11), %rdi
   callq *%rbx
-  movq %rax, %rdx
-  movq -8(%r15), %r11
-  movq %rdx, 16(%r11)
-  movq $0, %rdx
-  movq -8(%r15), %rax
+  movq %rax, %rsi
+  movq -16(%r15), %r11
+  movq %rsi, 16(%r11)
+  movq $0, %rsi
+  movq -16(%r15), %rax
   jmp block_exit
 block_exit:
 
-  movq %rsi, -16(%r15)
-  movq %rdi, %rbx
   popq %r14
   popq %r13
   popq %rbx
@@ -160,6 +160,7 @@ block_body7:
   jmp block_exit2
 block_exit2:
 
+  # At this point %rax should be 42
   popq %r14
   popq %r13
   popq %rbx
