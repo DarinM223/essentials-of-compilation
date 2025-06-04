@@ -8,4 +8,6 @@ example/example3
 example/example3.o
 example/example4
 example/example4.o
+example/example5
+example/example5.o
 c/runtime.o

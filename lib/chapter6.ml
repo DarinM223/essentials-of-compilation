@@ -922,7 +922,8 @@ module UncoverLivePass (X86 : X86_3) = struct
       X_instr.fwd (X86.indirect_callq (X_arg.bwd arg))
       |> add_read arg
       |> List.fold_right (fun r -> add_write (reg r)) caller_saves
-    let tail_jmp arg = X_instr.fwd @@ X86.tail_jmp @@ X_arg.bwd arg
+    let tail_jmp arg =
+      X_instr.fwd @@ X86.tail_jmp @@ X_arg.bwd arg |> add_read arg
     let leaq src dest =
       X_instr.fwd (X86.leaq (X_arg.bwd src) (X_arg.bwd dest))
       |> add_read src |> add_write dest
@@ -1037,14 +1038,14 @@ module PatchInstructionsPass (X86 : X86_3) = struct
     let leaq (_, src) (info2, dest) =
       match info2 with
       | ArgInfo.MemoryReference _ ->
-        X86.[ movq (reg rax) dest; leaq src (reg rax) ]
+        X86.[ leaq src (reg rax); movq (reg rax) dest ]
       | _ -> X_instr.fwd @@ X86.leaq src dest
 
     let tail_jmp (info, arg) =
       if info = ArgInfo.HashedRegister (Hashtbl.hash X86.rax) then
         X_instr.fwd @@ X86.tail_jmp arg
       else
-        X86.[ X86.tail_jmp (reg rax); movq arg (reg rax) ]
+        X86.[ movq arg (reg rax); X86.tail_jmp (reg rax) ]
   end
 end
 module PatchInstructions (F : X86_3) : X86_3 with type 'a obs = 'a F.obs =
@@ -1171,7 +1172,9 @@ module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
     match program_info stack_size root_stack_size with
     | Some (_, footer) ->
       let footer = List.map (fun f -> f info) footer in
-      String.concat "\n" (footer @ [ instr ])
+      (match footer @ [ instr ] with
+      | head :: rest -> String.concat "\n" (head :: List.map indent rest)
+      | [] -> failwith "Empty instruction list with footer, this can't happen")
     | None -> instr
   let leaq a b _ = "leaq " ^ a ^ ", " ^ b
 
@@ -1390,27 +1393,38 @@ let%expect_test "Example 1 ExplicateControl & UncoverLocals" =
     (block_f11 . (goto block_f9))))
     |}]
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R4_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (Shrink
+          (RevealFunctions
+             (ExposeAllocation
+                (RemoveComplex
+                   (F1_Collect_Annotate_Types
+                      (ExplicateControl
+                         (F1_Collect_Pretty ())
+                         (UncoverLocals
+                            (SelectInstructions
+                               (C3_Pretty)
+                               (UncoverLive
+                                  (BuildInterference
+                                     (BuildMoves
+                                        (AllocateRegisters
+                                           (PatchInstructions (X86_3_Printer))))))))
+                         ())))))))
+
 let%expect_test
     "Example 1 SelectInstructions & Uncover Live & Allocate Registers" =
-  let module M =
-    Ex1
-      (TransformLet
-         (Shrink
-            (RevealFunctions
-               (ExposeAllocation
-                  (RemoveComplex
-                     (F1_Collect_Annotate_Types
-                        (ExplicateControl
-                           (F1_Collect_Pretty ())
-                           (UncoverLocals
-                              (SelectInstructions
-                                 (C3_Pretty)
-                                 (UncoverLive
-                                    (BuildInterference
-                                       (BuildMoves
-                                          (AllocateRegisters
-                                             (PatchInstructions (X86_3_Printer))))))))
-                           ()))))))) in
+  let module M = Compiler (Int) (Ex1) () in
   Format.printf "Ex1: %s" M.res;
   [%expect
     {|
@@ -1574,6 +1588,155 @@ let%expect_test
       movq %rsi, %r11
       movq 16(%r11), %rax
       jmp block_exit2
+    block_exit2:
+
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      retq
+    |}]
+
+let%expect_test "Example 2 Allocate Registers" =
+  let module M = Compiler (Bool) (Ex2) () in
+  Format.printf "Ex1: %s" M.res;
+  [%expect
+    {|
+    Ex1: .global main
+    .text
+    tmp0:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      addq $0, %r15
+    start4:
+
+      movq $0, %rsi
+      cmpq %rsi, %rdi
+      je block_t2
+      jmp block_f3
+    block_t2:
+
+      jmp block_t0
+    block_f3:
+
+      jmp block_f1
+    block_t0:
+
+      movq $1, %rax
+      jmp block_exit
+    block_f1:
+
+      leaq tmp1(%rip), %rsi
+      movq $1, %rdx
+      negq %rdx
+      addq %rdx, %rdi
+      movq %rsi, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
+    block_exit:
+
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      retq
+    tmp1:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      addq $0, %r15
+    start9:
+
+      movq $0, %rsi
+      cmpq %rsi, %rdi
+      je block_t7
+      jmp block_f8
+    block_t7:
+
+      jmp block_t5
+    block_f8:
+
+      jmp block_f6
+    block_t5:
+
+      movq $0, %rax
+      jmp block_exit1
+    block_f6:
+
+      leaq tmp0(%rip), %rsi
+      movq $1, %rdx
+      negq %rdx
+      addq %rdx, %rdi
+      movq %rsi, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
+    block_exit1:
+
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      retq
+    main:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      movq $16384, %rdi
+      movq $16, %rsi
+      callq initialize
+      movq rootstack_begin(%rip), %r15
+      movq $0, (%r15)
+      addq $0, %r15
+    start10:
+
+      leaq tmp0(%rip), %rsi
+      movq $24, %rdi
+      movq %rsi, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
     block_exit2:
 
       popq %r14
