@@ -10,4 +10,6 @@ example/example4
 example/example4.o
 example/example5
 example/example5.o
+example/example6
+example/example6.o
 c/runtime.o

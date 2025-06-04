@@ -1151,15 +1151,7 @@ module X86_3_Pretty = struct
   let program = String.concat "\n"
 end
 
-module X86_Info = struct
-  type t = {
-    stack_size : int option;
-    root_stack_size : int option;
-  }
-
-  let init () = { stack_size = None; root_stack_size = None }
-end
-
+module X86_Info = Chapter2_passes.X86_Info
 module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
   X86_3 with type 'a obs = string = struct
   include Chapter5.X86_2_Printer_Helper (R)
@@ -1167,15 +1159,7 @@ module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
 
   let fun_ref label = label ^ "(%rip)"
   let indirect_callq a _ = "callq *" ^ a
-  let tail_jmp a (X86_Info.{ stack_size; root_stack_size } as info) =
-    let instr = "jmp *" ^ a in
-    match program_info stack_size root_stack_size with
-    | Some (_, footer) ->
-      let footer = List.map (fun f -> f info) footer in
-      (match footer @ [ instr ] with
-      | head :: rest -> String.concat "\n" (head :: List.map indent rest)
-      | [] -> failwith "Empty instruction list with footer, this can't happen")
-    | None -> instr
+  let tail_jmp a = pop_stack_with_instr ("jmp *" ^ a)
   let leaq a b _ = "leaq " ^ a ^ ", " ^ b
 
   let function_info stack_size root_stack_size =
@@ -1188,21 +1172,22 @@ module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
     in
     Option.map add_root_stack (function_prologue_epilogue stack_size)
 
-  let function_helper init stack_size root_stack_size blocks =
+  let function_helper stack_size root_stack_size blocks =
+    let header_footer = function_info stack_size root_stack_size in
+    let init = X86_Info.{ stack_size; root_stack_size; header_footer } in
     blocks
     |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
-    |> apply_header_footer (function_info stack_size root_stack_size) init
+    |> apply_header init
 
   let define ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_ v
       blocks =
-    let init = X86_Info.{ stack_size; root_stack_size } in
     String.concat "\n"
       ((v ^ ":\n")
       ::
       (if v = "main" then
-         program_helper init stack_size root_stack_size blocks
+         program_helper stack_size root_stack_size blocks
        else
-         function_helper init stack_size root_stack_size blocks))
+         function_helper stack_size root_stack_size blocks))
   let program defs = String.concat "\n" @@ [ ".global main"; ".text" ] @ defs
 end
 
@@ -1602,10 +1587,10 @@ let%expect_test
 
 let%expect_test "Example 2 Allocate Registers" =
   let module M = Compiler (Bool) (Ex2) () in
-  Format.printf "Ex1: %s" M.res;
+  Format.printf "Ex2: %s" M.res;
   [%expect
     {|
-    Ex1: .global main
+    Ex2: .global main
     .text
     tmp0:
 
@@ -1737,7 +1722,40 @@ let%expect_test "Example 2 Allocate Registers" =
       popq %rbp
       subq $0, %r15
       jmp *%rax
-    block_exit2:
+    |}]
+
+let%expect_test "Example 3 Allocate Registers" =
+  let module M = Compiler (Int) (Ex3) () in
+  Format.printf "Ex3: %s" M.res;
+  [%expect
+    {|
+    Ex3: .global main
+    .text
+    tmp0:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      addq $0, %r15
+    start0:
+
+      addq %rsi, %rdi
+      addq %rdx, %rdi
+      addq %rcx, %rdi
+      addq %r8, %rdi
+      movq %r9, %r11
+      movq 8(%r11), %rsi
+      addq %rsi, %rdi
+      movq %r9, %r11
+      movq 16(%r11), %rsi
+      movq %rdi, %rax
+      addq %rsi, %rax
+      jmp block_exit
+    block_exit:
 
       popq %r14
       popq %r13
@@ -1747,4 +1765,79 @@ let%expect_test "Example 2 Allocate Registers" =
       popq %rbp
       subq $0, %r15
       retq
+    main:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $16, %rsp
+      movq $16384, %rdi
+      movq $16, %rsi
+      callq initialize
+      movq rootstack_begin(%rip), %r15
+      movq $0, (%r15)
+      addq $0, %r15
+    start6:
+
+      leaq tmp0(%rip), %rax
+      movq %rax, -8(%rbp)
+      movq $1, -16(%rbp)
+      movq $2, %r12
+      movq $3, %r13
+      movq $4, %r14
+      movq $5, %rbx
+      movq free_ptr(%rip), %rdx
+      movq $24, %rsi
+      addq %rsi, %rdx
+      movq fromspace_end(%rip), %rsi
+      cmpq %rsi, %rdx
+      jl block_t4
+      jmp block_f5
+    block_t4:
+
+      jmp block_t2
+    block_f5:
+
+      jmp block_f3
+    block_t2:
+
+      movq $0, %rsi
+      jmp block_body1
+    block_f3:
+
+      movq %r15, %rdi
+      movq $24, %rsi
+      callq collect
+      jmp block_body1
+    block_body1:
+
+      movq free_ptr(%rip), %r9
+      addq $16, free_ptr(%rip)
+      movq %r9, %r11
+      movq $5, (%r11)
+      movq $6, %rsi
+      movq %r9, %r11
+      movq %rsi, 8(%r11)
+      movq $0, %rsi
+      movq $7, %rsi
+      movq %r9, %r11
+      movq %rsi, 16(%r11)
+      movq $0, %rsi
+      movq -16(%rbp), %rdi
+      movq %r12, %rsi
+      movq %r13, %rdx
+      movq %r14, %rcx
+      movq %rbx, %r8
+      movq -8(%rbp), %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
     |}]

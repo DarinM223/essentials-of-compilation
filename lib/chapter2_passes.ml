@@ -309,6 +309,17 @@ module ListUtils = struct
     | [] -> a
 end
 
+module X86_Info = struct
+  type t = {
+    stack_size : int option;
+    root_stack_size : int option;
+    header_footer : ((t -> string) list * (t -> string) list) option;
+  }
+
+  let init () =
+    { stack_size = None; root_stack_size = None; header_footer = None }
+end
+
 module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
   type 'a reg = string
   type 'a arg = string
@@ -317,6 +328,8 @@ module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
   type 'a program = string
   type label = string
   type 'a obs = string
+
+  let indent s = "  " ^ s
 
   let rsp = "%rsp"
   let rbp = "%rbp"
@@ -345,7 +358,17 @@ module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
   let addq a b _ = "addq " ^ a ^ ", " ^ b
   let subq a b _ = "subq " ^ a ^ ", " ^ b
   let movq a b _ = "movq " ^ a ^ ", " ^ b
-  let retq _ = "retq"
+
+  let pop_stack_with_instr instr info =
+    match info.X86_Info.header_footer with
+    | Some (_, footer) ->
+      let footer = List.map (fun f -> f info) footer in
+      (match footer @ [ instr ] with
+      | head :: rest -> String.concat "\n" (head :: List.map indent rest)
+      | [] -> failwith "Empty instruction list with footer, this can't happen")
+    | None -> instr
+
+  let retq = pop_stack_with_instr "retq"
   let negq a _ = "negq " ^ a
   let callq l _ = "callq " ^ l
   let pushq a _ = "pushq " ^ a
@@ -369,35 +392,32 @@ module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
           [ popq r14; popq r13; popq rbx; popq r12; movq rbp rsp; popq rbp ] ))
       stack_size
 
-  let indent s = "  " ^ s
-
   let block ?live_after:_ instrs r =
     instrs |> List.map (fun f -> f r) |> List.map indent
 
-  let apply_header_footer info r instrs =
-    match info with
-    | Some (header, footer) ->
-      let header = List.map (fun f -> f r) header in
-      let footer = List.map (fun f -> f r) footer in
-      ListUtils.add_before_end (List.map indent footer)
-        (List.map indent header @ instrs)
+  let apply_header info instrs =
+    match info.X86_Info.header_footer with
+    | Some (header, _) ->
+      let header = List.map (fun f -> f info) header in
+      List.map indent header @ instrs
     | None -> instrs
 
-  let program_helper init stack_size blocks =
+  let program_helper stack_size blocks =
+    let header_footer = function_prologue_epilogue stack_size in
+    let init = X86_Info.{ stack_size; root_stack_size = None; header_footer } in
     blocks
     |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
-    |> apply_header_footer (function_prologue_epilogue stack_size) init
+    |> apply_header init
 
   let program ?stack_size ?conflicts:_ ?moves:_ blocks =
-    let init = R.init () in
     String.concat "\n"
     @@ [ ".global main"; ".text"; "main:" ]
-    @ program_helper init stack_size blocks
+    @ program_helper stack_size blocks
 
   let observe s = s
 end
 
-module X86_0_Printer = X86_0_Printer_Helper (Chapter1.UnitReader)
+module X86_0_Printer = X86_0_Printer_Helper (X86_Info)
 
 module Ex4 (F : R1) = struct
   open F

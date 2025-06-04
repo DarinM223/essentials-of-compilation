@@ -306,7 +306,7 @@ module X86_1_Printer_Helper (R : Chapter1.Reader) = struct
   let label l _ = l ^ ":"
 end
 
-module X86_1_Printer = X86_1_Printer_Helper (Chapter1.UnitReader)
+module X86_1_Printer = X86_1_Printer_Helper (Chapter2_passes.X86_Info)
 
 module TransformLet (F : R2) : R2_Let with type 'a obs = 'a F.obs = struct
   module M = Chapter2_definitions.TransformLetPass (F)
@@ -555,7 +555,7 @@ module UncoverLivePass (X86 : X86_1) = struct
       List.iter add_edges blocks;
       let rev_topo_labels = ref [] in
       Topsort.iter (fun v -> rev_topo_labels := v :: !rev_topo_labels) graph;
-      (G.succ graph, !rev_topo_labels)
+      (graph, !rev_topo_labels)
 
     let program_helper blocks =
       let build_fn_map =
@@ -566,21 +566,31 @@ module UncoverLivePass (X86 : X86_1) = struct
       (* From the blocks construct a graph using the successors and do a reverse topsort.
          Then for each block in the ordering, pass in the live_before sets of the
          previously calculated blocks that are successors to the block. *)
-      let block_succ, rev_topsort_labels = rev_topsort_block_labels blocks in
+      let graph, rev_topsort_labels = rev_topsort_block_labels blocks in
       let cached_live_before = StringHashtbl.create (List.length blocks) in
       let result_blocks = StringHashtbl.create (List.length blocks) in
       let go label =
-        let succ_live_before =
-          List.map (StringHashtbl.find cached_live_before) (block_succ label)
-        in
-        let build_fn = StringHashtbl.find build_fn_map label in
-        let live_before, block = build_fn succ_live_before in
-        StringHashtbl.add cached_live_before label live_before;
-        StringHashtbl.add result_blocks label block
+        (* Don't handle unreachable blocks, they will be removed in filter_map *)
+        if
+          String.starts_with ~prefix:"start" label
+          || not (List.is_empty (G.pred graph label))
+        then (
+          let succ_live_before =
+            List.map
+              (StringHashtbl.find cached_live_before)
+              (G.succ graph label)
+          in
+          let build_fn = StringHashtbl.find build_fn_map label in
+          let live_before, block = build_fn succ_live_before in
+          StringHashtbl.add cached_live_before label live_before;
+          StringHashtbl.add result_blocks label block)
       in
       List.iter go rev_topsort_labels;
       rev_topsort_labels |> List.rev
-      |> List.map (fun label -> (label, StringHashtbl.find result_blocks label))
+      |> List.filter_map (fun label ->
+             Option.map
+               (fun block -> (label, block))
+               (StringHashtbl.find_opt result_blocks label))
 
     let program ?stack_size ?conflicts ?moves blocks =
       let blocks = program_helper blocks in

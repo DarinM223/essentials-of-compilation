@@ -892,6 +892,7 @@ module X86_2_Pretty = struct
     program_helper info body
 end
 
+module X86_Info = Chapter2_passes.X86_Info
 module X86_2_Printer_Helper (R : Chapter1.Reader) = struct
   include Chapter4.X86_1_Printer_Helper (R)
 
@@ -918,20 +919,21 @@ module X86_2_Printer_Helper (R : Chapter1.Reader) = struct
     in
     Option.map add_root_stack (function_prologue_epilogue stack_size)
 
-  let program_helper init stack_size root_stack_size blocks =
+  let program_helper stack_size root_stack_size blocks =
+    let header_footer = program_info stack_size root_stack_size in
+    let init = X86_Info.{ stack_size; root_stack_size; header_footer } in
     blocks
     |> List.concat_map (fun (label, block) -> (label ^ ":\n") :: block init)
-    |> apply_header_footer (program_info stack_size root_stack_size) init
+    |> apply_header init
 
   let program ?locals:_ ?stack_size ?root_stack_size ?conflicts:_ ?moves:_
       blocks =
-    let init = R.init () in
     String.concat "\n"
     @@ [ ".global main"; ".text"; "main:" ]
-    @ program_helper init stack_size root_stack_size blocks
+    @ program_helper stack_size root_stack_size blocks
 end
 
-module X86_2_Printer = X86_2_Printer_Helper (Chapter1.UnitReader)
+module X86_2_Printer = X86_2_Printer_Helper (Chapter2_passes.X86_Info)
 
 module Ex0 (F : R3_Let) = struct
   open F

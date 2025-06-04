@@ -131,13 +131,3 @@ start10:
   popq %rbp
   subq $0, %r15
   jmp *%rax
-block_exit2:
-
-  popq %r14
-  popq %r13
-  popq %rbx
-  popq %r12
-  movq %rbp, %rsp
-  popq %rbp
-  subq $0, %r15
-  retq
