@@ -566,7 +566,7 @@ let%expect_test "Example 1 after allocate registers" =
   let open Chapter2_passes in
   let module M =
     Ex1 (UncoverLive (BuildInterference (AllocateRegisters (X86_0_Printer)))) in
-  Format.printf "%s\n" M.res;
+  print_endline M.res;
   [%expect
     {|
     .global main
@@ -608,7 +608,7 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
     Ex1
       (UncoverLive
          (BuildInterference (BuildMoves (AllocateRegisters (X86_0_Printer))))) in
-  Format.printf "%s\n" M.res;
+  print_endline M.res;
   [%expect
     {|
     .global main
@@ -653,7 +653,7 @@ let%expect_test
       (UncoverLive
          (BuildInterference
             (BuildMoves (AllocateRegisters (PatchInstructions (X86_0_Printer)))))) in
-  Format.printf "%s\n" M.res;
+  print_endline M.res;
   [%expect
     {|
     .global main

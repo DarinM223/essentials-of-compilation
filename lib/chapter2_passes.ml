@@ -559,7 +559,7 @@ let%expect_test "Example 6 final printed X86" =
                   (C0_Pretty))
                   (AssignHomes (PatchInstructions (X86_0_Printer))))
             ())) in
-  Format.printf "%s\n" M.res;
+  print_endline M.res;
   [%expect
     {|
     .global main

@@ -1097,10 +1097,10 @@ let%expect_test "Ex2 allocate registers" =
                                        (AllocateRegisters
                                           (PatchInstructions (X86_2_Printer))))))))
                         ())))))) in
-  Format.printf "Ex2: %s" M.res;
+  print_endline M.res;
   [%expect
     {|
-    Ex2: .global main
+    .global main
     .text
     main:
       pushq %rbp

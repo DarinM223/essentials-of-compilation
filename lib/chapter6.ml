@@ -1251,6 +1251,18 @@ module Ex3 (F : R4_Let) = struct
     body Ty.Int (var add $ [ int 1; int 2; int 3; int 4; int 5; int 6; int 7 ])
 end
 
+module Ex4 (F : R4_Let) = struct
+  open F
+  let res =
+    observe @@ program
+    @@
+    let@ bar = Ty.([ Int; Int ] --> Int) @> fun [ a; b ] -> var a + var b in
+    let@ foo =
+      Ty.([ Int; Int ] --> Int) @> fun [ a; b ] -> var bar $ [ var b; var a ]
+    in
+    body Ty.Int (var foo $ [ int 3; int 4 ])
+end
+
 let%expect_test "Example 1 RemoveLet, Shrink, and RevealFunctions" =
   let module M = Ex1 (TransformLet (Shrink (RevealFunctions (F1_Pretty ())))) in
   Format.printf "Ex1: %s" M.res;
@@ -1410,10 +1422,10 @@ module Compiler
 let%expect_test
     "Example 1 SelectInstructions & Uncover Live & Allocate Registers" =
   let module M = Compiler (Int) (Ex1) () in
-  Format.printf "Ex1: %s" M.res;
+  print_endline M.res;
   [%expect
     {|
-    Ex1: .global main
+    .global main
     .text
     tmp0:
 
@@ -1587,10 +1599,10 @@ let%expect_test
 
 let%expect_test "Example 2 Allocate Registers" =
   let module M = Compiler (Bool) (Ex2) () in
-  Format.printf "Ex2: %s" M.res;
+  print_endline M.res;
   [%expect
     {|
-    Ex2: .global main
+    .global main
     .text
     tmp0:
 
@@ -1726,10 +1738,10 @@ let%expect_test "Example 2 Allocate Registers" =
 
 let%expect_test "Example 3 Allocate Registers" =
   let module M = Compiler (Int) (Ex3) () in
-  Format.printf "Ex3: %s" M.res;
+  print_endline M.res;
   [%expect
     {|
-    Ex3: .global main
+    .global main
     .text
     tmp0:
 
@@ -1832,6 +1844,94 @@ let%expect_test "Example 3 Allocate Registers" =
       movq %r14, %rcx
       movq %rbx, %r8
       movq -8(%rbp), %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
+    |}]
+
+let%expect_test "Example 4 Allocate Registers" =
+  let module M = Compiler (Int) (Ex4) () in
+  print_endline M.res;
+  [%expect
+    {|
+    .global main
+    .text
+    tmp0:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      addq $0, %r15
+    start0:
+
+      movq %rdi, %rax
+      addq %rsi, %rax
+      jmp block_exit
+    block_exit:
+
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      retq
+    tmp3:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      addq $0, %r15
+    start1:
+
+      movq %rdi, %rcx
+      movq %rsi, %rdi
+      leaq tmp0(%rip), %rdx
+      movq %rcx, %rsi
+      movq %rdx, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      subq $0, %r15
+      jmp *%rax
+    main:
+
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+      movq $16384, %rdi
+      movq $16, %rsi
+      callq initialize
+      movq rootstack_begin(%rip), %r15
+      movq $0, (%r15)
+      addq $0, %r15
+    start2:
+
+      leaq tmp3(%rip), %rdx
+      movq $3, %rdi
+      movq $4, %rsi
+      movq %rdx, %rax
       popq %r14
       popq %r13
       popq %rbx
