@@ -194,21 +194,22 @@ module R4_Shrink_R_T (R : Chapter1.Reader) (F : R4_Shrink) = struct
   module VarHList = F.VarHList
   module VarLimitList = F.VarLimitList
   type 'a def = R.t -> 'a F.def
+  let rec convert_hlist : type t. R.t -> t ExpHList.hlist -> t F.ExpHList.hlist
+      =
+   fun r -> function
+    | x :: xs ->
+      let x = x r in
+      x :: convert_hlist r xs
+    | [] -> []
+  let convert_hlist_limit : type t.
+      R.t -> t ExpLimitList.limit -> t F.ExpLimitList.limit =
+   fun r -> function
+    | LX (l, l') -> LX (convert_hlist r l, convert_hlist r l')
+    | L l -> L (convert_hlist r l)
 
   let app e es r =
-    let rec convert_hlist : type t. t ExpHList.hlist -> t F.ExpHList.hlist =
-      function
-      | x :: xs ->
-        let x = x r in
-        x :: convert_hlist xs
-      | [] -> []
-    in
-    let go : type t. t ExpLimitList.limit -> t F.ExpLimitList.limit = function
-      | LX (l, l') -> LX (convert_hlist l, convert_hlist l')
-      | L l -> L (convert_hlist l)
-    in
     let e = e r in
-    let es = go es in
+    let es = convert_hlist_limit r es in
     F.app e es
 
   let define ty v vs e rest r =
@@ -245,20 +246,18 @@ struct
   module VarHList = F.VarHList
   module VarLimitList = F.VarLimitList
   open X_exp
+  let rec convert_hlist : type t. t ExpHList.hlist -> t F.ExpHList.hlist =
+    function
+    | x :: xs ->
+      let x = bwd x in
+      x :: convert_hlist xs
+    | [] -> []
+  let convert_hlist_limit : type r.
+      r ExpLimitList.limit -> r F.ExpLimitList.limit = function
+    | LX (l, l') -> LX (convert_hlist l, convert_hlist l')
+    | L l -> L (convert_hlist l)
 
-  let app f es =
-    let rec convert_hlist : type t. t ExpHList.hlist -> t F.ExpHList.hlist =
-      function
-      | x :: xs ->
-        let x = bwd x in
-        x :: convert_hlist xs
-      | [] -> []
-    in
-    let go : type r. r ExpLimitList.limit -> r F.ExpLimitList.limit = function
-      | LX (l, l') -> LX (convert_hlist l, convert_hlist l')
-      | L l -> L (convert_hlist l)
-    in
-    fwd @@ F.app (bwd f) (go es)
+  let app f es = fwd @@ F.app (bwd f) (convert_hlist_limit es)
   let define ty v vs body rest =
     X_def.fwd @@ F.define ty v vs (bwd body) (X_def.bwd rest)
   let body ty e = X_def.fwd @@ F.body ty (bwd e)
