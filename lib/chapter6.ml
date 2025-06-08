@@ -486,29 +486,40 @@ module TransformLetPass (F : R4) = struct
     let ( @> ) ty fn = Wrapped.{ ty; fn }
     let ( @@> ) realized fn = Wrapped2.{ realized; fn }
 
+    let rec convert_exps : type r. R.t -> r ExpHList.hlist -> r F.ExpHList.hlist
+        =
+     fun r -> function
+      | x :: xs ->
+        let x = x r in
+        x :: convert_exps r xs
+      | [] -> []
+
+    let rec vars_of_tys : type r.
+        r Ty.TyLimitList.HList.hlist -> r F.VarHList.hlist = function
+      | _ :: xs ->
+        let v = F.fresh () in
+        v :: vars_of_tys xs
+      | [] -> []
+
+    let rec vars_of_units : type r. r UnitHList.hlist -> r F.VarHList.hlist =
+      function
+      | _ :: xs ->
+        let v = F.fresh () in
+        v :: vars_of_units xs
+      | [] -> []
+
     let ( $ ) f es r =
       let f = f r in
-      let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
-        | x :: xs ->
-          let x = x r in
-          x :: go xs
-        | [] -> []
+      let es =
+        F.ExpLimitList.fwd { f = (fun l -> F.vector l) } (convert_exps r es)
       in
-      let es = F.ExpLimitList.fwd { f = (fun l -> F.vector l) } (go es) in
       F.app f es
 
     let var v r = r.R.to_exp (F.string_of_var v)
 
     let let_helper var f g r =
-      let rec go : type r. r Ty.TyLimitList.HList.hlist -> r F.VarHList.hlist =
-        function
-        | _ :: xs ->
-          let v = F.fresh () in
-          v :: go xs
-        | [] -> []
-      in
       let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
-      let params = go (Ty.TyLimitList.bwd params) in
+      let params = vars_of_tys (Ty.TyLimitList.bwd params) in
       let r' = R.{ to_exp = r.to_exp } in
       let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
         let tuple_var = F.fresh () in
@@ -537,13 +548,7 @@ module TransformLetPass (F : R4) = struct
     let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
     let ( let@@ ) f g r =
-      let rec go : type r. r UnitHList.hlist -> r F.VarHList.hlist = function
-        | _ :: xs ->
-          let v = F.fresh () in
-          v :: go xs
-        | [] -> []
-      in
-      let vars = go f.Wrapped2.realized in
+      let vars = vars_of_units f.Wrapped2.realized in
       let fns = f.fn vars in
       let rest = g vars r in
       let rec go : type r. r FnHList.hlist * r F.VarHList.hlist -> 'a F.def =
