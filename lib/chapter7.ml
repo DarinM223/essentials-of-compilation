@@ -31,12 +31,6 @@ module type R5_Shrink = sig
     'b def ->
     'b def
 
-  val lam :
-    ('tup -> 'a) Ty.ty ->
-    'tup VarClosure.closure ->
-    'a exp ->
-    (unit * 'tup -> 'a) exp
-
   val unsafe_vector : string list -> 'a exp
   val unsafe_vector_ref : 'a exp -> int -> 'b exp
 end
@@ -91,7 +85,6 @@ module R5_Shrink_R_T (R : Chapter1.Reader) (F : R5_Shrink) = struct
     let rest = rest r in
     F.define ty v vs e rest
 
-  let lam ty vs e r = F.lam ty vs (e r)
   let unsafe_vector vs _ = F.unsafe_vector vs
   let unsafe_vector_ref e i r = F.unsafe_vector_ref (e r) i
 end
@@ -122,7 +115,6 @@ struct
   let app f es = X_exp.fwd @@ F.app (X_exp.bwd f) (convert_hlist_limit es)
   let define ty v vs body rest =
     X_def.fwd @@ F.define ty v vs (X_exp.bwd body) (X_def.bwd rest)
-  let lam ty vs e = X_exp.fwd @@ F.lam ty vs (X_exp.bwd e)
   let unsafe_vector vs = X_exp.fwd @@ F.unsafe_vector vs
   let unsafe_vector_ref e i = X_exp.fwd @@ F.unsafe_vector_ref (X_exp.bwd e) i
 end
@@ -237,15 +229,15 @@ module TransformLetPass (F : R5) = struct
           (F.var_of_string (F.string_of_var lambda_def_var))
           params' body rest
       in
-      r.free_vars <-
-        StringSet.diff
-          (StringSet.union r.free_vars r'.free_vars)
-          (set_of_hlist_limit params');
+      let free_vars =
+        StringSet.diff r'.free_vars (set_of_hlist_limit params')
+      in
+      r.free_vars <- StringSet.union r.free_vars free_vars;
       let lifted_defs = r.lifted_defs in
       r.lifted_defs <-
         (fun def -> r'.lifted_defs (lifted_lambda_def (lifted_defs def)));
       let closure_params =
-        F.string_of_var lambda_def_var :: StringSet.to_list r'.free_vars
+        F.string_of_var lambda_def_var :: StringSet.to_list free_vars
       in
       F.unsafe_vector closure_params
   end
@@ -256,6 +248,23 @@ module TransformLet (F : R5) : R5_Let with type 'a obs = 'a F.obs = struct
   module R = R5_R_T (M.R) (F)
   include R
   include M.IDelta (R)
+end
+
+module Shrink (F : R5_Shrink) : R5 with type 'a obs = 'a F.obs = struct
+  module M = Chapter6.ShrinkPass (R4_of_R5_Shrink (F))
+  include R5_Shrink_T (M.X_exp) (M.X_def) (M.X_program) (F)
+  include M.IDelta
+  let body ty e =
+    F.(
+      define Ty.([] --> ty) (var_of_string "main") (L [ fresh () ]) e (endd ()))
+end
+
+module R5_Shrink_Pretty () = struct
+  include Chapter6.R4_Shrink_Pretty ()
+  module ExpClosure = ClosureFn (ExpLimitList)
+  module VarClosure = ClosureFn (VarLimitList)
+  let unsafe_vector vars = "(vector " ^ String.concat " " vars ^ ")"
+  let unsafe_vector_ref e i = "(vector-ref " ^ e ^ " " ^ string_of_int i ^ ")"
 end
 
 module Ex (F : R5_Let) = struct
@@ -273,3 +282,18 @@ module Ex (F : R5_Let) = struct
        let* h = var f $ [ int 3 ] in
        (var g $ [ int 11 ]) + (var h $ [ int 15 ]))
 end
+
+let%expect_test "Example RemoveLet & Shrink" =
+  let module M = Ex (TransformLet (Shrink (R5_Shrink_Pretty ()))) in
+  Format.printf "Ex: %s" M.res;
+  [%expect
+    {|
+    Ex: (program
+    (define (tmp6 tmp5 tmp4)
+      (+ (+ (var tmp1) (var tmp3)) (var tmp4)))
+    (define (tmp0 tmp2 tmp1)
+      (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
+    (define (main tmp13)
+      (let ([tmp8 (let ([tmp7 (var tmp0)]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (var tmp0)]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
+    )
+    |}]
