@@ -219,18 +219,30 @@ module TransformLetPass (F : R5) = struct
       let r' = { (R.clone r) with free_vars = StringSet.empty } in
       let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
       let params = vars_of_tys (Ty.TyLimitList.bwd params) in
-      let params' = F.VarHList.(F.fresh () :: params) in
+      let closure_var = F.fresh () in
+      let params' = F.VarHList.(closure_var :: params) in
       let body = f.fn params r' in
       let params' = F.VarLimitList.fwd (tuple_handler r') params' in
       let lambda_def_var = F.fresh () in
-      (* TODO: unpack free vars in body *)
+      let free_vars =
+        StringSet.diff r'.free_vars (set_of_hlist_limit params')
+      in
+      (* Unpack free vars in body *)
+      let body =
+        let rec unpack_free_vars i = function
+          | v :: vs ->
+            F.(
+              lett (var_of_string v)
+                (unsafe_vector_ref (var closure_var) i)
+                (unpack_free_vars (Stdlib.( + ) i 1) vs))
+          | [] -> body
+        in
+        unpack_free_vars 1 @@ StringSet.to_list free_vars
+      in
       let lifted_lambda_def rest =
         F.define ty
           (F.var_of_string (F.string_of_var lambda_def_var))
           params' body rest
-      in
-      let free_vars =
-        StringSet.diff r'.free_vars (set_of_hlist_limit params')
       in
       r.free_vars <- StringSet.union r.free_vars free_vars;
       let lifted_defs = r.lifted_defs in
@@ -290,7 +302,7 @@ let%expect_test "Example RemoveLet & Shrink" =
     {|
     Ex: (program
     (define (tmp6 tmp5 tmp4)
-      (+ (+ (var tmp1) (var tmp3)) (var tmp4)))
+      (let ([tmp1 (vector-ref (var tmp5) 1)]) (let ([tmp3 (vector-ref (var tmp5) 2)]) (+ (+ (var tmp1) (var tmp3)) (var tmp4)))))
     (define (tmp0 tmp2 tmp1)
       (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
     (define (main tmp13)
