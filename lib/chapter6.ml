@@ -456,11 +456,23 @@ struct
   let program defs = X_program.fwd @@ F.program @@ List.map X_def.bwd defs
 end
 
+module StringSet = Chapter2_definitions.StringSet
 module TransformLetPass (F : R4) = struct
   include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
   module R = struct
-    type t = { mutable to_exp : 'a. string -> 'a F.exp }
-    let init () = { to_exp = (fun v -> F.var (F.var_of_string v)) }
+    type t = {
+      mutable to_exp : 'a. string -> 'a F.exp;
+      mutable free_vars : StringSet.t;
+      mutable lifted_defs : 'a. 'a F.def -> 'a F.def;
+    }
+    let init () =
+      {
+        to_exp = (fun v -> F.var (F.var_of_string v));
+        free_vars = StringSet.empty;
+        lifted_defs = (fun def -> def);
+      }
+    let clone { to_exp; free_vars; lifted_defs } =
+      { to_exp; free_vars; lifted_defs }
   end
   module IDelta (F' : R4 with type 'a exp = R.t -> 'a F.exp) = struct
     include IDelta
@@ -517,18 +529,15 @@ module TransformLetPass (F : R4) = struct
 
     let var v r = r.R.to_exp (F.string_of_var v)
 
-    let let_helper var f g r =
-      let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
-      let params = vars_of_tys (Ty.TyLimitList.bwd params) in
-      let r' = R.{ to_exp = r.to_exp } in
-      let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
+    let tuple_handler (r : R.t) : F.VarLimitList.convert =
+      let handler l =
         let tuple_var = F.fresh () in
         let rec go : type a tup t.
             t F.VarHList.hlist * (a, tup) Chapter5.ptr -> unit = function
           | x :: xs, ptr ->
-            let x : string = F.string_of_var x in
-            let old_handler = r'.to_exp in
-            r'.to_exp <-
+            let x = F.string_of_var x in
+            let old_handler = r.to_exp in
+            r.to_exp <-
               (fun v ->
                 if Stdlib.( = ) x v then
                   F.vector_ref (F.var tuple_var) (Obj.magic ptr)
@@ -540,7 +549,13 @@ module TransformLetPass (F : R4) = struct
         go (l, Here);
         tuple_var
       in
-      let params' = F.VarLimitList.fwd { f = tuple_handler } params in
+      { f = handler }
+
+    let let_helper var f g r =
+      let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
+      let params = vars_of_tys (Ty.TyLimitList.bwd params) in
+      let r' = R.clone r in
+      let params' = F.VarLimitList.fwd (tuple_handler r') params in
       let body = f.fn params r' in
       let rest = g var r in
       F.define ty var params' body rest

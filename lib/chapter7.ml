@@ -156,115 +156,46 @@ struct
   let fun_ref label = X_exp.fwd @@ F.fun_ref label
 end
 
+module StringSet = Chapter2_definitions.StringSet
 module TransformLetPass (F : R5) = struct
   include Chapter6.TransformLetPass (R4_of_R5 (F))
 
-  module X_exp = struct
-    type 'a from = 'a F.exp
-    type 'a term = 'a F.var list * 'a F.def list * 'a from
-    let fwd t = ([], [], t)
-    let bwd (_, _, t) = t
-  end
+  module IDelta (F' : R5 with type 'a exp = R.t -> 'a F.exp) = struct
+    include IDelta (R4_of_R5 (F'))
 
-  module X_def = Chapter1.MkId (struct
-    type 'a t = 'a F.def
-  end)
-  module X_program = Chapter1.MkId (struct
-    type 'a t = 'a F.program
-  end)
-
-  module IDelta (F' : R5 with type 'a exp = R.t -> 'a X_exp.term) = struct
-    (* include IDelta (R4_of_R5 (F')) *)
-    include F'
-    module UnitHList = Chapter5.HListFn (struct
-      type 'a t = unit
-    end)
-    module Wrapped = struct
-      type ('r, 'a) t = {
-        ty : ('r -> 'a) Ty.ty;
-        fn : 'r F.VarHList.hlist -> 'a F'.exp;
-      }
-    end
-    module FnHList = Chapter6.FnHListFn (struct
-      type ('a, 'b) t = ('a, 'b) Wrapped.t
-    end)
-    module Wrapped2 = struct
-      type ('r, 'a) t = {
-        realized : 'r UnitHList.hlist;
-        fn : 'r F.VarHList.hlist -> 'r FnHList.hlist;
-      }
-    end
-
-    let rec convert_exps : type r. R.t -> r ExpHList.hlist -> r F.ExpHList.hlist
-        =
-     fun r -> function
-      | x :: xs ->
-        let _, _, x = x r in
-        x :: convert_exps r xs
-      | [] -> []
-
-    let rec vars_of_tys : type r.
-        r Ty.TyLimitList.HList.hlist -> r F.VarHList.hlist = function
-      | _ :: xs ->
-        let v = F.fresh () in
-        v :: vars_of_tys xs
-      | [] -> []
-
-    let rec vars_of_units : type r. r UnitHList.hlist -> r F.VarHList.hlist =
-      function
-      | _ :: xs ->
-        let v = F.fresh () in
-        v :: vars_of_units xs
-      | [] -> []
-
-    let ( @> ) ty fn = Wrapped.{ ty; fn }
-    let ( @@> ) realized fn = Wrapped2.{ realized; fn }
-
-    let ( let* ) = failwith ""
+    let ( let* ) e f r =
+      let e = e r in
+      let var = F.fresh () in
+      let body = f var r in
+      r.R.free_vars <- StringSet.remove (F.string_of_var var) r.R.free_vars;
+      F.lett var e body
 
     let ( $ ) fn es r =
-      let _, _, fn = fn r in
+      let fn = fn r in
       let tmp = F.fresh () in
       let es =
         F.ExpLimitList.fwd
           { f = (fun l -> F.vector l) }
           (F.(var (var_of_string (string_of_var tmp))) :: convert_exps r es)
       in
-      ([], [], F.(lett tmp fn (app (unsafe_vector_ref (var tmp) 0) es)))
+      F.(lett tmp fn (app (unsafe_vector_ref (var tmp) 0) es))
 
-    (* TODO: expressions pass up list of free variables and list of definitions *)
-
-    let var v r = ([], [], r.R.to_exp (F.string_of_var v))
+    let var v r =
+      let v = F.string_of_var v in
+      r.R.free_vars <- StringSet.add v r.R.free_vars;
+      r.to_exp v
 
     let let_helper var f g r =
       let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
       let params = vars_of_tys (Ty.TyLimitList.bwd params) in
       let params' = F.VarHList.(F.fresh () :: params) in
-      let r' = R.{ to_exp = r.to_exp } in
-      let tuple_handler (type r) (l : r F.VarHList.hlist) : r F.var =
-        let tuple_var = F.fresh () in
-        let rec go : type a tup t.
-            t F.VarHList.hlist * (a, tup) Chapter5.ptr -> unit = function
-          | x :: xs, ptr ->
-            let x : string = F.string_of_var x in
-            let old_handler = r'.to_exp in
-            r'.to_exp <-
-              (fun v ->
-                if Stdlib.( = ) x v then
-                  F.vector_ref (F.var tuple_var) (Obj.magic ptr)
-                else
-                  old_handler v);
-            go (xs, Chapter5.Next ptr)
-          | [], _ -> ()
-        in
-        go (l, Here);
-        tuple_var
-      in
-      let params' = F.VarLimitList.fwd { f = tuple_handler } params' in
-      let _, _, body = f.fn params r' in
+      let r' = R.clone r in
+      let params' = F.VarLimitList.fwd (tuple_handler r') params' in
+      let body = f.fn params r' in
       let rest = g var r in
-      (* TODO: define lifted up definitions before this one *)
-      F.define ty (F.var_of_string (F.string_of_var var)) params' body rest
+      (* Define lifted up definitions before this one *)
+      r'.lifted_defs
+      @@ F.define ty (F.var_of_string (F.string_of_var var)) params' body rest
 
     let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
@@ -284,18 +215,45 @@ module TransformLetPass (F : R5) = struct
       in
       go (fns, vars)
 
-    (* let program def () =
-      let init = R.init () in
-      F.program (def init) *)
-    let program _ = failwith ""
+    let rec set_of_hlist : type r. r F.VarHList.hlist -> StringSet.t = function
+      | v :: vs -> StringSet.add (F.string_of_var v) (set_of_hlist vs)
+      | [] -> StringSet.empty
+    let set_of_hlist_limit : type r. r F.VarLimitList.limit -> StringSet.t =
+      function
+      | LX (vs, _) -> set_of_hlist vs
+      | L vs -> set_of_hlist vs
 
-    let lambda _ = failwith ""
+    let lambda f r =
+      let r' = { (R.clone r) with free_vars = StringSet.empty } in
+      let (Ty.Fn (params, _) as ty) = f.Wrapped.ty in
+      let params = vars_of_tys (Ty.TyLimitList.bwd params) in
+      let params' = F.VarHList.(F.fresh () :: params) in
+      let body = f.fn params r' in
+      let params' = F.VarLimitList.fwd (tuple_handler r') params' in
+      let lambda_def_var = F.fresh () in
+      (* TODO: unpack free vars in body *)
+      let lifted_lambda_def rest =
+        F.define ty
+          (F.var_of_string (F.string_of_var lambda_def_var))
+          params' body rest
+      in
+      r.free_vars <-
+        StringSet.diff
+          (StringSet.union r.free_vars r'.free_vars)
+          (set_of_hlist_limit params');
+      let lifted_defs = r.lifted_defs in
+      r.lifted_defs <-
+        (fun def -> r'.lifted_defs (lifted_lambda_def (lifted_defs def)));
+      let closure_params =
+        F.string_of_var lambda_def_var :: StringSet.to_list r'.free_vars
+      in
+      F.unsafe_vector closure_params
   end
 end
 
 module TransformLet (F : R5) : R5_Let with type 'a obs = 'a F.obs = struct
   module M = TransformLetPass (F)
-  module R = R5_R_T (M.R) (R5_T (M.X_exp) (M.X_def) (M.X_program) (F))
+  module R = R5_R_T (M.R) (F)
   include R
   include M.IDelta (R)
 end
