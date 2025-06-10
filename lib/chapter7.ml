@@ -1,4 +1,8 @@
 module Ty = Chapter6.Ty
+module StringHashtbl = Chapter6.StringHashtbl
+module R3_Types = Chapter5.R3_Types
+module StringSet = Chapter2_definitions.StringSet
+module StringMap = Chapter6.StringMap
 
 module type CLOSURE = sig
   module Limit : Chapter6.LIMIT
@@ -65,6 +69,12 @@ module R4_of_R5_Shrink (F : R5_Shrink) = struct
 end
 
 module R4_of_R5 (F : R5) = struct
+  include F
+  let app _ _ = failwith "Please handle app"
+  let define _ _ _ _ _ = failwith "Please handle define"
+end
+
+module F1_of_F2 (F : F2) = struct
   include F
   let app _ _ = failwith "Please handle app"
   let define _ _ _ _ _ = failwith "Please handle define"
@@ -148,7 +158,6 @@ struct
   let fun_ref label = X_exp.fwd @@ F.fun_ref label
 end
 
-module StringSet = Chapter2_definitions.StringSet
 module TransformLetPass (F : R5) = struct
   include Chapter6.TransformLetPass (R4_of_R5 (F))
 
@@ -186,8 +195,8 @@ module TransformLetPass (F : R5) = struct
       let body = f.fn params r' in
       let rest = g var r in
       (* Define lifted up definitions before this one *)
-      r'.lifted_defs
-      @@ F.define ty (F.var_of_string (F.string_of_var var)) params' body rest
+      F.define ty (F.var_of_string (F.string_of_var var)) params' body
+      @@ r'.lifted_defs rest
 
     let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
@@ -271,12 +280,53 @@ module Shrink (F : R5_Shrink) : R5 with type 'a obs = 'a F.obs = struct
       define Ty.([] --> ty) (var_of_string "main") (L [ fresh () ]) e (endd ()))
 end
 
+module RevealFunctions (F : F2) : R5_Shrink with type 'a obs = 'a F.obs = struct
+  module M = Chapter6.RevealFunctionsPass (F1_of_F2 (F))
+  include R5_Shrink_R_T (M.R) (F)
+  include M.IDelta
+  let var v is_function =
+    if StringHashtbl.mem is_function (F.string_of_var v) then
+      let tmp = F.fresh () in
+      F.lett tmp
+        (F.fun_ref (F.string_of_var v))
+        (F.unsafe_vector [ F.string_of_var tmp ])
+    else
+      F.var v
+  let define ty v params body rest is_function =
+    StringHashtbl.add is_function (F.string_of_var v) ();
+    let rest = rest is_function in
+    let body = body is_function in
+    F.define ty v params body rest
+end
+
+module R5_Annotate_Types (F : R5_Shrink) :
+  R5_Shrink
+    with type 'a var = 'a F.var
+     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a def =
+      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  include Chapter6.R4_Annotate_Types (R4_of_R5_Shrink (F))
+  module ExpClosure = ClosureFn (ExpLimitList)
+  module VarClosure = ClosureFn (VarLimitList)
+  let app = failwith ""
+  let define = failwith ""
+  let unsafe_vector = failwith ""
+  let unsafe_vector_ref = failwith ""
+end
+
 module R5_Shrink_Pretty () = struct
   include Chapter6.R4_Shrink_Pretty ()
   module ExpClosure = ClosureFn (ExpLimitList)
   module VarClosure = ClosureFn (VarLimitList)
   let unsafe_vector vars = "(vector " ^ String.concat " " vars ^ ")"
   let unsafe_vector_ref e i = "(vector-ref " ^ e ^ " " ^ string_of_int i ^ ")"
+end
+
+module F2_Pretty () = struct
+  include R5_Shrink_Pretty ()
+  let fun_ref label = "(fun-ref " ^ label ^ ")"
 end
 
 module Ex (F : R5_Let) = struct
@@ -296,16 +346,16 @@ module Ex (F : R5_Let) = struct
 end
 
 let%expect_test "Example RemoveLet & Shrink" =
-  let module M = Ex (TransformLet (Shrink (R5_Shrink_Pretty ()))) in
+  let module M = Ex (TransformLet (Shrink (RevealFunctions (F2_Pretty ())))) in
   Format.printf "Ex: %s" M.res;
   [%expect
     {|
     Ex: (program
-    (define (tmp6 tmp5 tmp4)
-      (let ([tmp1 (vector-ref (var tmp5) 1)]) (let ([tmp3 (vector-ref (var tmp5) 2)]) (+ (+ (var tmp1) (var tmp3)) (var tmp4)))))
     (define (tmp0 tmp2 tmp1)
       (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
+    (define (tmp6 tmp5 tmp4)
+      (let ([tmp1 (vector-ref (var tmp5) 1)]) (let ([tmp3 (vector-ref (var tmp5) 2)]) (+ (+ (var tmp1) (var tmp3)) (var tmp4)))))
     (define (main tmp13)
-      (let ([tmp8 (let ([tmp7 (var tmp0)]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (var tmp0)]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
+      (let ([tmp8 (let ([tmp7 (let ([tmp14 (fun-ref tmp0)]) (vector tmp14))]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (let ([tmp15 (fun-ref tmp0)]) (vector tmp15))]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
     )
     |}]
