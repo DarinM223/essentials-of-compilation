@@ -59,10 +59,17 @@ and Ty : sig
     | Void : unit ty
     | Vector : 'tup TyHList.hlist -> 'tup ty
     | Fn : 'tup TyLimitList.limit * 'a ty -> ('tup -> 'a) ty
+  val to_hlist : 'r TyLimitList.HList.hlist -> 'r TyHList.hlist
   val ( --> ) : 'a TyHList.hlist -> 'b ty -> ('a -> 'b) ty
   val reflect : 'a ty -> R3_Types.typ
 end = struct
   module TyLimitList = LimitFn (TyHList)
+
+  let rec to_hlist : type r. r TyLimitList.HList.hlist -> r TyHList.hlist =
+    function
+    | v :: vs -> v :: to_hlist vs
+    | [] -> []
+
   type _ ty =
     | Int : int ty
     | Bool : bool ty
@@ -637,7 +644,9 @@ module R4_Annotate_Types (F : R4_Shrink) :
      and type 'a def =
       R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
      and type 'a program = 'a F.program
-     and type 'a obs = 'a F.obs = struct
+     and type 'a obs = 'a F.obs
+     and module VarHList = F.VarHList
+     and module VarLimitList = F.VarLimitList = struct
   include Chapter5.R3_Annotate_Types (R3_of_R4_Shrink (F))
   type 'a def = R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
   module ExpLimitList = LimitFn (ExpHList)

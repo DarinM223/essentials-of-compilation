@@ -195,8 +195,8 @@ module TransformLetPass (F : R5) = struct
       let body = f.fn params r' in
       let rest = g var r in
       (* Define lifted up definitions before this one *)
-      F.define ty (F.var_of_string (F.string_of_var var)) params' body
-      @@ r'.lifted_defs rest
+      r'.lifted_defs
+      @@ F.define ty (F.var_of_string (F.string_of_var var)) params' body rest
 
     let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
@@ -311,7 +311,36 @@ module R5_Annotate_Types (F : R5_Shrink) :
   module ExpClosure = ClosureFn (ExpLimitList)
   module VarClosure = ClosureFn (VarLimitList)
   let app = failwith ""
-  let define = failwith ""
+
+  (* TODO: Change lookup map from StringMap to StringHashtbl so that unsafe_vector
+     can modify the binding.
+   *)
+  let define (Ty.Fn (params, ret) as ty) v vs body rest m =
+    let params = Ty.TyLimitList.bwd params in
+    let (Ty.Fn (params, _) as ty') =
+      Ty.(to_hlist TyLimitList.HList.(Void :: params) --> ret)
+    in
+    let m = StringMap.add (F.string_of_var v) (Ty.reflect ty') m in
+    let m, rest = rest m in
+    let rec add_param_types : type r.
+        r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> 'a -> 'a =
+     fun vars tys map ->
+      match (vars, tys) with
+      | v :: vs, t :: ts ->
+        add_param_types vs ts
+          (StringMap.add (F.string_of_var v) (Ty.reflect t) map)
+      | [], [] -> map
+    in
+    let add_param_types (type r) (vars : r VarClosure.closure)
+        (tys : (unit * r) Ty.TyLimitList.limit) map =
+      match (vars, tys) with
+      | LX (vs, _), LX (ts, _) -> add_param_types vs ts map
+      | L vs, L ts -> add_param_types vs ts map
+      | _, _ -> failwith "This can never happen"
+    in
+    let m' = add_param_types vs params m in
+    let _, body = body m' in
+    (m, F.define ty v vs body rest)
   let unsafe_vector = failwith ""
   let unsafe_vector_ref = failwith ""
 end
@@ -351,10 +380,10 @@ let%expect_test "Example RemoveLet & Shrink" =
   [%expect
     {|
     Ex: (program
-    (define (tmp0 tmp2 tmp1)
-      (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
     (define (tmp6 tmp5 tmp4)
       (let ([tmp1 (vector-ref (var tmp5) 1)]) (let ([tmp3 (vector-ref (var tmp5) 2)]) (+ (+ (var tmp1) (var tmp3)) (var tmp4)))))
+    (define (tmp0 tmp2 tmp1)
+      (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
     (define (main tmp13)
       (let ([tmp8 (let ([tmp7 (let ([tmp14 (fun-ref tmp0)]) (vector tmp14))]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (let ([tmp15 (fun-ref tmp0)]) (vector tmp15))]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
     )
