@@ -637,18 +637,9 @@ module RevealFunctions (F : F1) : R4_Shrink with type 'a obs = 'a F.obs = struct
   include M.IDelta
 end
 
-module R4_Annotate_Types (F : R4_Shrink) :
-  R4_Shrink
-    with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
-     and type 'a def =
-      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
-     and type 'a program = 'a F.program
-     and type 'a obs = 'a F.obs
-     and module VarHList = F.VarHList
-     and module VarLimitList = F.VarLimitList = struct
+module R4_Annotate_Types (F : R4_Shrink) = struct
   include Chapter5.R3_Annotate_Types (R3_of_R4_Shrink (F))
-  type 'a def = R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+  type 'a def = R3_Types.typ StringHashtbl.t -> 'a F.def
   module ExpLimitList = LimitFn (ExpHList)
   module VarHList = F.VarHList
   module VarLimitList = F.VarLimitList
@@ -672,56 +663,68 @@ module R4_Annotate_Types (F : R4_Shrink) :
     in
     let es = go es in
     (rty, F.has_type (F.app e es) rty)
+
+  let rec add_param_types : type r.
+      'a -> r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> unit =
+   fun table vars tys ->
+    match (vars, tys) with
+    | v :: vs, t :: ts ->
+      StringHashtbl.add table (F.string_of_var v) (Ty.reflect t);
+      add_param_types table vs ts
+    | [], [] -> ()
+  let add_param_types_limit (type r) table (vars : r VarLimitList.limit)
+      (tys : r Ty.TyLimitList.limit) =
+    match (vars, tys) with
+    | LX (vs, _), LX (ts, _) -> add_param_types table vs ts
+    | L vs, L ts -> add_param_types table vs ts
+    | _, _ -> failwith "This can never happen"
+
+  let rec remove_param_types : type r.
+      'a StringHashtbl.t -> r VarHList.hlist -> unit =
+   fun table -> function
+    | v :: vs ->
+      StringHashtbl.remove table (F.string_of_var v);
+      remove_param_types table vs
+    | [] -> ()
+  let remove_param_types_limit : type r.
+      'a StringHashtbl.t -> r VarLimitList.limit -> unit =
+   fun table -> function
+    | LX (l, _) -> remove_param_types table l
+    | L l -> remove_param_types table l
+
   let define (Ty.Fn (params, _) as ty) v vs body rest m =
-    let m = StringMap.add (F.string_of_var v) (Ty.reflect ty) m in
-    let m, rest = rest m in
-    let rec add_param_types : type r.
-        r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> 'a -> 'a =
-     fun vars tys map ->
-      match (vars, tys) with
-      | v :: vs, t :: ts ->
-        add_param_types vs ts
-          (StringMap.add (F.string_of_var v) (Ty.reflect t) map)
-      | [], [] -> map
-    in
-    let add_param_types (type r) (vars : r VarLimitList.limit)
-        (tys : r Ty.TyLimitList.limit) map =
-      match (vars, tys) with
-      | LX (vs, _), LX (ts, _) -> add_param_types vs ts map
-      | L vs, L ts -> add_param_types vs ts map
-      | _, _ -> failwith "This can never happen"
-    in
-    let m' = add_param_types vs params m in
-    let _, body = body m' in
-    (m, F.define ty v vs body rest)
+    StringHashtbl.add m (F.string_of_var v) (Ty.reflect ty);
+    let rest = rest m in
+    add_param_types_limit m vs params;
+    let _, body = body m in
+    remove_param_types_limit m vs;
+    F.define ty v vs body rest
 
   let body ty e m =
     let _, e = e m in
-    (m, F.body ty e)
-  let endd () m = (m, F.endd ())
+    F.body ty e
+  let endd () _ = F.endd ()
   let program def =
-    let _, def = def StringMap.empty in
+    let def = def (StringHashtbl.create 100) in
     F.program def
 end
 module F1_Annotate_Types (F : F1) :
   F1
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
-     and type 'a def =
-      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
+     and type 'a def = R3_Types.typ StringHashtbl.t -> 'a F.def
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include R4_Annotate_Types (F)
   let fun_ref label m =
-    let ty = StringMap.find label m in
+    let ty = StringHashtbl.find m label in
     (ty, F.has_type (F.fun_ref label) ty)
 end
 module F1_Collect_Annotate_Types (F : F1_Collect) :
   F1_Collect
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
-     and type 'a def =
-      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
+     and type 'a def = R3_Types.typ StringHashtbl.t -> 'a F.def
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include Chapter5.R3_Collect_Annotate_Types (R3_of_F1_Collect (F))

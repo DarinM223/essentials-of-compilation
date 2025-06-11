@@ -302,9 +302,8 @@ end
 module R5_Annotate_Types (F : R5_Shrink) :
   R5_Shrink
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
-     and type 'a def =
-      R3_Types.typ StringMap.t -> R3_Types.typ StringMap.t * 'a F.def
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
+     and type 'a def = R3_Types.typ StringHashtbl.t -> 'a F.def
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include Chapter6.R4_Annotate_Types (R4_of_R5_Shrink (F))
@@ -312,35 +311,19 @@ module R5_Annotate_Types (F : R5_Shrink) :
   module VarClosure = ClosureFn (VarLimitList)
   let app = failwith ""
 
-  (* TODO: Change lookup map from StringMap to StringHashtbl so that unsafe_vector
-     can modify the binding.
-   *)
   let define (Ty.Fn (params, ret) as ty) v vs body rest m =
     let params = Ty.TyLimitList.bwd params in
     let (Ty.Fn (params, _) as ty') =
       Ty.(to_hlist TyLimitList.HList.(Void :: params) --> ret)
     in
-    let m = StringMap.add (F.string_of_var v) (Ty.reflect ty') m in
-    let m, rest = rest m in
-    let rec add_param_types : type r.
-        r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> 'a -> 'a =
-     fun vars tys map ->
-      match (vars, tys) with
-      | v :: vs, t :: ts ->
-        add_param_types vs ts
-          (StringMap.add (F.string_of_var v) (Ty.reflect t) map)
-      | [], [] -> map
-    in
-    let add_param_types (type r) (vars : r VarClosure.closure)
-        (tys : (unit * r) Ty.TyLimitList.limit) map =
-      match (vars, tys) with
-      | LX (vs, _), LX (ts, _) -> add_param_types vs ts map
-      | L vs, L ts -> add_param_types vs ts map
-      | _, _ -> failwith "This can never happen"
-    in
-    let m' = add_param_types vs params m in
-    let _, body = body m' in
-    (m, F.define ty v vs body rest)
+    StringHashtbl.add m (F.string_of_var v) (Ty.reflect ty');
+    let rest = rest m in
+    add_param_types_limit m vs params;
+    let _, body = body m in
+    remove_param_types_limit m vs;
+    F.define ty v vs body rest
+
+  (* TODO: unsafe_vector replaces the closure type in the function binding *)
   let unsafe_vector = failwith ""
   let unsafe_vector_ref = failwith ""
 end

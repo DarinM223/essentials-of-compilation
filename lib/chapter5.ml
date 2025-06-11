@@ -1,3 +1,6 @@
+module StringHashtbl = Chapter2_passes.StringHashtbl
+module StringMap = Chapter2_definitions.StringMap
+
 type (_, _) ptr =
   | Here : ('a, 'a * _) ptr
   | Next : ('a, 'r) ptr -> ('a, _ * 'r) ptr
@@ -112,17 +115,15 @@ module type R3_Let = sig
   include Chapter2_definitions.R1_Let with type 'a exp := 'a exp
 end
 
-module StringMap = Chapter2_definitions.StringMap
-
 module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
   Chapter4.R2_Shrink
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   open R3_Types
   type 'a var = 'a F.var
-  type 'a exp = typ StringMap.t -> typ * 'a F.exp
+  type 'a exp = typ StringHashtbl.t -> typ * 'a F.exp
   type 'a program = 'a F.program
   type 'a obs = 'a F.obs
 
@@ -144,7 +145,7 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
   let var v m =
     let v_str = F.string_of_var v in
     let ty =
-      match StringMap.find_opt v_str m with
+      match StringHashtbl.find_opt m v_str with
       | Some ty -> ty
       | None -> failwith @@ "Could not lookup type for variable: " ^ v_str
     in
@@ -154,7 +155,9 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
   let string_of_var = F.string_of_var
   let lett v e b m =
     let typ, e = e m in
-    let result_typ, b = b (StringMap.add (F.string_of_var v) typ m) in
+    StringHashtbl.add m (F.string_of_var v) typ;
+    let result_typ, b = b m in
+    StringHashtbl.remove m (F.string_of_var v);
     (result_typ, F.lett v e b)
 
   let t _ = (Bool, F.t)
@@ -171,7 +174,7 @@ module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
     (t, F.if_ cond thn els)
 
   let program e =
-    let _, e = e StringMap.empty in
+    let _, e = e (StringHashtbl.create 100) in
     F.program e
   let observe p = F.observe p
 end
@@ -179,7 +182,7 @@ end
 module R3_Annotate_Types (F : R3_Shrink) :
   R3_Shrink
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include R2_Shrink_AnnotateTypes (F)
@@ -254,7 +257,7 @@ end
 module R3_Collect_Annotate_Types (F : R3_Collect) :
   R3_Collect
     with type 'a var = 'a F.var
-     and type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
      and type 'a program = 'a F.program
      and type 'a obs = 'a F.obs = struct
   include R3_Annotate_Types (F)
@@ -365,7 +368,8 @@ module ExposeAllocationPass (F : R3_Collect) = struct
   module IDelta
       (F' :
         R3_Collect
-          with type 'a exp = R3_Types.typ StringMap.t -> R3_Types.typ * 'a F.exp) =
+          with type 'a exp =
+            R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp) =
   struct
     open F'
     let vector_helper hl m =
@@ -554,7 +558,6 @@ module ExplicateControl (F : R3_Collect) (C2 : C2) () = struct
   let global_value name = convert_exp (C2.global_value name)
 end
 
-module StringHashtbl = Chapter2_passes.StringHashtbl
 module UncoverLocalsPass (F : C2) = struct
   module R = struct
     type t = string option * R3_Types.typ StringHashtbl.t
