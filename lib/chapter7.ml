@@ -309,23 +309,67 @@ module R5_Annotate_Types (F : R5_Shrink) :
   include Chapter6.R4_Annotate_Types (R4_of_R5_Shrink (F))
   module ExpClosure = ClosureFn (ExpLimitList)
   module VarClosure = ClosureFn (VarLimitList)
-  let app = failwith ""
+  let app e es m =
+    let ety, e = e m in
+    let rty =
+      match ety with
+      | R3_Types.Fn (_, ret) -> ret
+      | _ -> failwith "Applying expression that isn't a function type"
+    in
+    let es = convert_exps_limit m es in
+    (rty, F.has_type (F.app e es) rty)
 
   let define (Ty.Fn (params, ret) as ty) v vs body rest m =
     let params = Ty.TyLimitList.bwd params in
     let (Ty.Fn (params, _) as ty') =
       Ty.(to_hlist TyLimitList.HList.(Void :: params) --> ret)
     in
-    StringHashtbl.add m (F.string_of_var v) (Ty.reflect ty');
+    let ty' =
+      match Ty.reflect ty' with
+      | Fn (Void :: params, ret) ->
+        let rec ty'' = R3_Types.(Fn (Vector [ ty'' ] :: params, ret)) in
+        ty''
+      | _ -> failwith "Invalid type in define"
+    in
+    StringHashtbl.add m (F.string_of_var v) ty';
     let rest = rest m in
     add_param_types_limit m vs params;
     let _, body = body m in
     remove_param_types_limit m vs;
     F.define ty v vs body rest
 
-  (* TODO: unsafe_vector replaces the closure type in the function binding *)
-  let unsafe_vector = failwith ""
-  let unsafe_vector_ref = failwith ""
+  let unsafe_vector vs m =
+    match vs with
+    | head :: rest ->
+      let rest_types = List.map (StringHashtbl.find m) rest in
+      (match StringHashtbl.find_opt m head with
+      | Some R3_Types.(Fn (Vector _ :: params, ret)) ->
+        (* Expand existing function type to include closure params *)
+        let rec fn_ty =
+          R3_Types.(Fn (Vector (fn_ty :: rest_types) :: params, ret))
+        in
+        StringHashtbl.replace m head fn_ty;
+        (* Return closure type from function type *)
+        let closure_ty =
+          match fn_ty with
+          | Fn (closure :: _, _) -> closure
+          | _ -> failwith "Just created closure type cannot be found"
+        in
+        (closure_ty, F.has_type (F.unsafe_vector vs) closure_ty)
+      | Some ty ->
+        let closure_ty = R3_Types.Vector (ty :: rest_types) in
+        (closure_ty, F.has_type (F.unsafe_vector vs) closure_ty)
+      | None -> failwith "Can't find type for first parameter of unsafe_vector")
+    | [] -> (R3_Types.Vector [], F.has_type (F.unsafe_vector []) (Vector []))
+
+  let unsafe_vector_ref e i m =
+    let (t : R3_Types.typ), e = e m in
+    let indexed_ty =
+      match t with
+      | Vector typs -> List.nth typs i
+      | _ -> failwith "Expected vector type as argument to unsafe_vector_ref"
+    in
+    (indexed_ty, F.has_type (F.unsafe_vector_ref e i) indexed_ty)
 end
 
 module R5_Shrink_Pretty () = struct

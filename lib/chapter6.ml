@@ -644,6 +644,21 @@ module R4_Annotate_Types (F : R4_Shrink) = struct
   module VarHList = F.VarHList
   module VarLimitList = F.VarLimitList
 
+  let rec convert_exps : type r.
+      R3_Types.typ StringHashtbl.t -> r ExpHList.hlist -> r F.ExpHList.hlist =
+   fun m -> function
+    | x :: xs ->
+      let x = snd (x m) in
+      x :: convert_exps m xs
+    | [] -> []
+  let convert_exps_limit : type r.
+      R3_Types.typ StringHashtbl.t ->
+      r ExpLimitList.limit ->
+      r F.ExpLimitList.limit =
+   fun m -> function
+    | LX (l, l') -> LX (convert_exps m l, convert_exps m l')
+    | L l -> L (convert_exps m l)
+
   let app e es m =
     let ety, e = e m in
     let rty =
@@ -651,17 +666,7 @@ module R4_Annotate_Types (F : R4_Shrink) = struct
       | R3_Types.Fn (_, ret) -> ret
       | _ -> failwith "Applying expression that isn't a function type"
     in
-    let rec go : type r. r ExpHList.hlist -> r F.ExpHList.hlist = function
-      | x :: xs ->
-        let x = snd (x m) in
-        x :: go xs
-      | [] -> []
-    in
-    let go : type r. r ExpLimitList.limit -> r F.ExpLimitList.limit = function
-      | LX (l, l') -> LX (go l, go l')
-      | L l -> L (go l)
-    in
-    let es = go es in
+    let es = convert_exps_limit m es in
     (rty, F.has_type (F.app e es) rty)
 
   let rec add_param_types : type r.

@@ -227,19 +227,11 @@ module R3_Annotate_Types (F : R3_Shrink) :
     (Vector res_typs, F.has_type (F.vector res_es) (Vector res_typs))
   let vector_ref e ptr m =
     let (t : typ), e = e m in
-    let typs =
+    let indexed_ty =
       match t with
-      | Vector typs -> typs
+      | Vector typs -> List.nth typs (ptr_num ptr)
       | _ -> failwith "Expected vector type as argument to vector_ref"
     in
-    let rec index_typ : type a r. typ list -> (a, r) ptr -> typ =
-     fun typs ptr ->
-      match (typs, ptr) with
-      | typ :: _, Here -> typ
-      | _ :: typs, Next ptr -> index_typ typs ptr
-      | [], _ -> failwith "Cannot get type from the index"
-    in
-    let indexed_ty = index_typ typs ptr in
     (indexed_ty, F.has_type (F.vector_ref e ptr) indexed_ty)
   let vector_set e ptr v m =
     let _, e = e m in
