@@ -63,7 +63,52 @@ module R3_Types = struct
     | Void
     | Vector of typ list
     | Fn of typ list * typ
-  [@@deriving show { with_path = false }]
+
+  module TypTable = Hashtbl.Make (struct
+    type t = typ
+    let equal = ( == )
+    let hash = Hashtbl.hash
+  end)
+  let pp_typ fmt ty =
+    let table = TypTable.create 100 in
+    let print_sep fmt sep f = function
+      | ty :: tys ->
+        let go ty =
+          Format.fprintf fmt sep;
+          f ty
+        in
+        f ty;
+        List.iter go tys
+      | [] -> ()
+    in
+    let rec go ty =
+      match ty with
+      | Int -> Format.fprintf fmt "Int"
+      | Bool -> Format.fprintf fmt "Bool"
+      | Void -> Format.fprintf fmt "Void"
+      | Vector typs ->
+        if TypTable.mem table ty then
+          Format.fprintf fmt "<cycle>"
+        else begin
+          TypTable.add table ty ();
+          Format.fprintf fmt "(Vector [";
+          print_sep fmt "; " go typs;
+          Format.fprintf fmt "])"
+        end
+      | Fn (params, ret) ->
+        if TypTable.mem table ty then
+          Format.fprintf fmt "<cycle>"
+        else begin
+          TypTable.add table ty ();
+          Format.fprintf fmt "(Fn ([";
+          print_sep fmt "; " go params;
+          Format.fprintf fmt "], ";
+          go ret;
+          Format.fprintf fmt "))"
+        end
+    in
+    go ty
+  let show_typ = Format.asprintf "%a" pp_typ
 
   let rec allocation_size : typ -> int = function
     | Vector ts ->
@@ -1195,3 +1240,15 @@ let%expect_test "Ex2 allocate registers" =
       subq $8, %r15
       retq
     |}]
+
+let%expect_test "Pretty printing of cyclical types" =
+  let open R3_Types in
+  let rec ty = Fn ([ Vector [ ty; Int; Int ]; Int ], Int) in
+  Format.printf "%a" pp_typ ty;
+  [%expect {| (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)) |}];
+  let ty = Fn ([ Vector [ Fn ([ Int ], Int) ]; Int ], Int) in
+  Format.printf "%a" pp_typ ty;
+  [%expect {| (Fn ([(Vector [(Fn ([Int], Int))]); Int], Int)) |}];
+  let rec ty = Vector [ Fn ([ ty; Int ], Int); Int; Int ] in
+  Format.printf "%a" pp_typ ty;
+  [%expect {| (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]) |}]
