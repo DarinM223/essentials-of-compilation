@@ -329,6 +329,27 @@ module RevealFunctions (F : F2) : R5_Shrink with type 'a obs = 'a F.obs = struct
     F.define ty v params body rest
 end
 
+let expand_closure_params m = function
+  | head :: rest ->
+    let rest_types = List.map (StringHashtbl.find m) rest in
+    (match StringHashtbl.find_opt m head with
+    | Some R3_Types.(Fn (Vector _ :: params, ret)) ->
+      (* Expand existing function type to include closure params *)
+      let rec fn_ty =
+        R3_Types.(Fn (Vector (fn_ty :: rest_types) :: params, ret))
+      in
+      StringHashtbl.replace m head fn_ty;
+      (* Return closure type from function type *)
+      let closure_ty =
+        match fn_ty with
+        | Fn (closure :: _, _) -> closure
+        | _ -> failwith "Just created closure type cannot be found"
+      in
+      closure_ty
+    | Some ty -> R3_Types.Vector (ty :: rest_types)
+    | None -> failwith "Can't find type for first parameter of unsafe_vector")
+  | [] -> R3_Types.Vector []
+
 module R5_Annotate_Types (F : R5_Shrink) :
   R5_Shrink
     with type 'a var = 'a F.var
@@ -384,34 +405,18 @@ module R5_Annotate_Types (F : R5_Shrink) :
     F.define ty v vs body rest
 
   let unsafe_vector vs m =
-    match vs with
-    | head :: rest ->
-      let rest_types = List.map (StringHashtbl.find m) rest in
-      (match StringHashtbl.find_opt m head with
-      | Some R3_Types.(Fn (Vector _ :: params, ret)) ->
-        (* Expand existing function type to include closure params *)
-        let rec fn_ty =
-          R3_Types.(Fn (Vector (fn_ty :: rest_types) :: params, ret))
-        in
-        StringHashtbl.replace m head fn_ty;
-        (* Return closure type from function type *)
-        let closure_ty =
-          match fn_ty with
-          | Fn (closure :: _, _) -> closure
-          | _ -> failwith "Just created closure type cannot be found"
-        in
-        (closure_ty, F.has_type (F.unsafe_vector vs) closure_ty)
-      | Some ty ->
-        let closure_ty = R3_Types.Vector (ty :: rest_types) in
-        (closure_ty, F.has_type (F.unsafe_vector vs) closure_ty)
-      | None -> failwith "Can't find type for first parameter of unsafe_vector")
-    | [] -> (R3_Types.Vector [], F.has_type (F.unsafe_vector []) (Vector []))
+    let closure_ty = expand_closure_params m vs in
+    (closure_ty, F.has_type (F.unsafe_vector vs) closure_ty)
 
   let unsafe_vector_ref e i m =
     let (t : R3_Types.typ), e = e m in
     let indexed_ty =
       match t with
-      | Vector typs -> List.nth typs i
+      | Vector typs ->
+        (try List.nth typs i
+         with Failure _e ->
+           failwith @@ "Error getting index " ^ string_of_int i ^ " for types "
+           ^ [%show: R3_Types.typ list] typs)
       | _ -> failwith "Expected vector type as argument to unsafe_vector_ref"
     in
     (indexed_ty, F.has_type (F.unsafe_vector_ref e i) indexed_ty)
@@ -457,6 +462,23 @@ module ExposeAllocationPass (F : F2_Collect) = struct
             R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp) =
   struct
     include IDelta (Chapter6.R3_of_F1_Collect (F1_of_F2_Collect (F')))
+    open F'
+    let unsafe_vector vs m =
+      let ty = expand_closure_params m vs in
+      let ty_size = R3_Types.allocation_size ty in
+      let exp =
+        allocate_vector ty ty_size @@ fun alloc ->
+        (* For every field set to the corresponding expression with unsafe_vector_set *)
+        let rec go i = function
+          | v :: vs ->
+            lett (fresh ())
+              (unsafe_vector_set (var alloc) i (var (var_of_string v)))
+            @@ go (Stdlib.( + ) i 1) vs
+          | _ -> var alloc
+        in
+        go 0 vs
+      in
+      exp m
   end
 end
 module ExposeAllocation (F : F2_Collect) : F2 with type 'a obs = 'a F.obs =
@@ -539,4 +561,15 @@ let%expect_test "Example Expose Allocation" =
     Ex
       (TransformLet
          (Shrink (RevealFunctions (ExposeAllocation (F2_Collect_Pretty ()))))) in
-  Format.printf "Ex: %s" M.res
+  Format.printf "Ex: %s" M.res;
+  [%expect
+    {|
+    Ex: (program
+    (define (tmp6 tmp5 tmp4)
+      (has-type (let ([tmp1 (has-type (vector-ref (has-type (var tmp5) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 1) Int)]) (has-type (let ([tmp3 (has-type (vector-ref (has-type (var tmp5) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 2) Int)]) (has-type (+ (has-type (+ (has-type (var tmp1) Int) (has-type (var tmp3) Int)) Int) (has-type (var tmp4) Int)) Int)) Int)) Int))
+    (define (tmp0 tmp2 tmp1)
+      (has-type (let ([tmp3 (has-type 4 Int)]) (has-type (let ([tmp26 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 32 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 32) Int)) Void)]) (has-type (let ([tmp22 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))]) (has-type (let ([tmp25 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 0 (has-type (var tmp6) (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)))) Void)]) (has-type (let ([tmp24 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 1 (has-type (var tmp1) Int)) Void)]) (has-type (let ([tmp23 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 2 (has-type (var tmp3) Int)) Void)]) (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))
+    (define (main tmp13)
+      (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (let ([tmp14 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (let ([tmp18 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp16 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp17 (has-type (vector-set! (has-type (var tmp16) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (var tmp14) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp16) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (let ([tmp15 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (let ([tmp21 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp19 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp20 (has-type (vector-set! (has-type (var tmp19) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (var tmp15) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp19) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
+    )
+    |}]

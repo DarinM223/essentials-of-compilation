@@ -420,20 +420,22 @@ module ExposeAllocationPass (F : R3_Collect) = struct
       in
       go hl
 
+    let allocate_vector ty ty_size k =
+      let alloc = fresh () in
+      lett (fresh ())
+        (if_
+           (global_value "free_ptr" + int ty_size < global_value "fromspace_end")
+           void (collect ty_size))
+      @@ lett alloc (allocate 1 ty)
+      @@ k alloc
+
     let vector : type tup. tup ExpHList.hlist -> tup exp =
      fun hl m ->
       let vtys, ves = vector_helper hl m in
       let ty = R3_Types.Vector vtys in
       let ty_size = R3_Types.allocation_size ty in
       let exp =
-        let alloc = fresh () in
-        lett (fresh ())
-          (if_
-             (global_value "free_ptr" + int ty_size
-             < global_value "fromspace_end")
-             void (collect ty_size))
-        @@ lett alloc (allocate 1 ty)
-        @@
+        allocate_vector ty ty_size @@ fun alloc ->
         (* For every field set to the corresponding expression with vector_set *)
         let rec go : type r a.
             R3_Types.typ list -> r F.ExpHList.hlist -> (a, tup) ptr -> tup exp =
