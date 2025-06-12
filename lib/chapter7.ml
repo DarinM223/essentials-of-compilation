@@ -49,6 +49,7 @@ module type R5_Shrink = sig
 
   val unsafe_vector : string list -> 'a exp
   val unsafe_vector_ref : 'a exp -> int -> 'b exp
+  val unsafe_vector_set : 'a exp -> int -> 'b exp -> unit exp
 end
 
 module type R5 = sig
@@ -74,6 +75,11 @@ module type F2 = sig
   val fun_ref : string -> 'a exp
 end
 
+module type F2_Collect = sig
+  include Chapter5.R3_Collect
+  include F2 with type 'a exp := 'a exp
+end
+
 module R4_of_R5_Shrink (F : R5_Shrink) = struct
   include F
   let app _ _ = failwith "Please handle app"
@@ -87,6 +93,12 @@ module R4_of_R5 (F : R5) = struct
 end
 
 module F1_of_F2 (F : F2) = struct
+  include F
+  let app _ _ = failwith "Please handle app"
+  let define _ _ _ _ _ = failwith "Please handle define"
+end
+
+module F1_of_F2_Collect (F : F2_Collect) = struct
   include F
   let app _ _ = failwith "Please handle app"
   let define _ _ _ _ _ = failwith "Please handle define"
@@ -109,6 +121,10 @@ module R5_Shrink_R_T (R : Chapter1.Reader) (F : R5_Shrink) = struct
 
   let unsafe_vector vs _ = F.unsafe_vector vs
   let unsafe_vector_ref e i r = F.unsafe_vector_ref (e r) i
+  let unsafe_vector_set e i e' r =
+    let e = e r in
+    let e' = e' r in
+    F.unsafe_vector_set e i e'
 end
 
 module R5_R_T (R : Chapter1.Reader) (F : R5) = struct
@@ -139,6 +155,8 @@ struct
     X_def.fwd @@ F.define ty v vs (X_exp.bwd body) (X_def.bwd rest)
   let unsafe_vector vs = X_exp.fwd @@ F.unsafe_vector vs
   let unsafe_vector_ref e i = X_exp.fwd @@ F.unsafe_vector_ref (X_exp.bwd e) i
+  let unsafe_vector_set e i e' =
+    X_exp.fwd @@ F.unsafe_vector_set (X_exp.bwd e) i (X_exp.bwd e')
 end
 
 module R5_T
@@ -397,6 +415,11 @@ module R5_Annotate_Types (F : R5_Shrink) :
       | _ -> failwith "Expected vector type as argument to unsafe_vector_ref"
     in
     (indexed_ty, F.has_type (F.unsafe_vector_ref e i) indexed_ty)
+
+  let unsafe_vector_set e i e' m =
+    let _, e = e m in
+    let _, e' = e' m in
+    R3_Types.(Void, F.has_type (F.unsafe_vector_set e i e') Void)
 end
 
 module F2_Annotate_Types (F : F2) :
@@ -412,17 +435,56 @@ module F2_Annotate_Types (F : F2) :
     (ty, F.has_type (F.fun_ref label) ty)
 end
 
+module F2_Collect_Annotate_Types (F : F2_Collect) :
+  F2_Collect
+    with type 'a var = 'a F.var
+     and type 'a exp = R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp
+     and type 'a def = R3_Types.typ StringHashtbl.t -> 'a F.def
+     and type 'a program = 'a F.program
+     and type 'a obs = 'a F.obs = struct
+  include Chapter6.F1_Collect_Annotate_Types (F1_of_F2_Collect (F))
+  include F2_Annotate_Types (F)
+end
+
+module ExposeAllocationPass (F : F2_Collect) = struct
+  include
+    Chapter5.ExposeAllocationPass
+      (Chapter6.R3_of_F1_Collect (F1_of_F2_Collect (F)))
+  module IDelta
+      (F' :
+        F2_Collect
+          with type 'a exp =
+            R3_Types.typ StringHashtbl.t -> R3_Types.typ * 'a F.exp) =
+  struct
+    include IDelta (Chapter6.R3_of_F1_Collect (F1_of_F2_Collect (F')))
+  end
+end
+module ExposeAllocation (F : F2_Collect) : F2 with type 'a obs = 'a F.obs =
+struct
+  module M = ExposeAllocationPass (F)
+  module F' = F2_Collect_Annotate_Types (F)
+  include F'
+  include M.IDelta (F')
+end
+
 module R5_Shrink_Pretty () = struct
   include Chapter6.R4_Shrink_Pretty ()
   module ExpClosure = ClosureFn (ExpLimitList)
   module VarClosure = ClosureFn (VarLimitList)
   let unsafe_vector vars = "(vector " ^ String.concat " " vars ^ ")"
   let unsafe_vector_ref e i = "(vector-ref " ^ e ^ " " ^ string_of_int i ^ ")"
+  let unsafe_vector_set e i e' =
+    "(vector-set! " ^ e ^ " " ^ string_of_int i ^ " " ^ e' ^ ")"
 end
 
 module F2_Pretty () = struct
   include R5_Shrink_Pretty ()
   let fun_ref label = "(fun-ref " ^ label ^ ")"
+end
+
+module F2_Collect_Pretty () = struct
+  include Chapter5.R3_Collect_Pretty ()
+  include F2_Pretty ()
 end
 
 module Ex (F : R5_Let) = struct
@@ -471,3 +533,10 @@ let%expect_test "Example Annotate Types" =
       (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (let ([tmp14 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (vector tmp14) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (let ([tmp15 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (vector tmp15) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
     )
     |}]
+
+let%expect_test "Example Expose Allocation" =
+  let module M =
+    Ex
+      (TransformLet
+         (Shrink (RevealFunctions (ExposeAllocation (F2_Collect_Pretty ()))))) in
+  Format.printf "Ex: %s" M.res
