@@ -188,6 +188,22 @@ struct
   let fun_ref label = X_exp.fwd @@ F.fun_ref label
 end
 
+module F2_Collect_T
+    (X_exp : Chapter1.TRANS)
+    (X_def : Chapter1.TRANS)
+    (X_program : Chapter1.TRANS)
+    (F :
+      F2_Collect
+        with type 'a exp = 'a X_exp.from
+         and type 'a def = 'a X_def.from
+         and type 'a program = 'a X_program.from) =
+struct
+  include
+    Chapter5.R3_Collect_T (X_exp) (X_program)
+      (Chapter6.R3_of_F1_Collect (F1_of_F2_Collect (F)))
+  include F2_T (X_exp) (X_def) (X_program) (F)
+end
+
 module TransformLetPass (F : R5) = struct
   include Chapter6.TransformLetPass (R4_of_R5 (F))
 
@@ -489,6 +505,23 @@ struct
   include M.IDelta (F')
 end
 
+module RemoveComplexPass (F : F2_Collect) = struct
+  include Chapter6.RemoveComplexPass (F1_of_F2_Collect (F))
+  open X
+  module IDelta (F' : F2_Collect with type 'a exp = 'a X.term) = struct
+    include IDelta (F1_of_F2_Collect (F'))
+    let app e es = (Complex, F.app (bwd e) (convert_exps_limit es))
+    let fun_ref label = (Complex, F.fun_ref label)
+  end
+end
+module RemoveComplex (F : F2_Collect) : F2_Collect with type 'a obs = 'a F.obs =
+struct
+  module M = RemoveComplexPass (F)
+  module F' = F2_Collect_T (M.X) (M.X_def) (M.X_program) (F)
+  include F'
+  include M.IDelta (F')
+end
+
 module R5_Shrink_Pretty () = struct
   include Chapter6.R4_Shrink_Pretty ()
   module ExpClosure = ClosureFn (ExpLimitList)
@@ -556,11 +589,13 @@ let%expect_test "Example Annotate Types" =
     )
     |}]
 
-let%expect_test "Example Expose Allocation" =
+let%expect_test "Example Expose Allocation & Remove Complex" =
   let module M =
     Ex
       (TransformLet
-         (Shrink (RevealFunctions (ExposeAllocation (F2_Collect_Pretty ()))))) in
+         (Shrink
+            (RevealFunctions
+               (ExposeAllocation (RemoveComplex (F2_Collect_Pretty ())))))) in
   Format.printf "Ex: %s" M.res;
   [%expect
     {|

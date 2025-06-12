@@ -751,17 +751,16 @@ module RemoveComplexPass (F : F1_Collect) = struct
   end)
   open X
   module IDelta (F' : F1_Collect with type 'a exp = 'a X.term) = struct
-    let app e es =
-      let rec go : type r. r F'.ExpHList.hlist -> r F.ExpHList.hlist = function
-        | x :: xs -> bwd x :: go xs
-        | [] -> []
-      in
-      let go : type r. r F'.ExpLimitList.limit -> r F.ExpLimitList.limit =
-        function
-        | LX (l, l') -> LX (go l, go l')
-        | L l -> L (go l)
-      in
-      (Complex, F.app (bwd e) (go es))
+    let rec convert_exps : type r. r F'.ExpHList.hlist -> r F.ExpHList.hlist =
+      function
+      | x :: xs -> bwd x :: convert_exps xs
+      | [] -> []
+    let convert_exps_limit : type r.
+        r F'.ExpLimitList.limit -> r F.ExpLimitList.limit = function
+      | LX (l, l') -> LX (convert_exps l, convert_exps l')
+      | L l -> L (convert_exps l)
+
+    let app e es = (Complex, F.app (bwd e) (convert_exps_limit es))
     let fun_ref label = (Complex, F.fun_ref label)
   end
 end
