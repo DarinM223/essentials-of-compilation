@@ -107,7 +107,7 @@ module type R4_Shrink = sig
 
   val app : ('tup -> 'a) exp -> 'tup ExpLimitList.limit -> 'a exp
   val define :
-    ('tup -> 'a) Ty.ty ->
+    R3_Types.typ ->
     ('tup -> 'a) var ->
     'tup VarLimitList.limit ->
     'a exp ->
@@ -565,7 +565,7 @@ module TransformLetPass (F : R4) = struct
       let params' = F.VarLimitList.fwd (tuple_handler r') params in
       let body = f.fn params r' in
       let rest = g var r in
-      F.define ty var params' body rest
+      F.define (Ty.reflect ty) var params' body rest
 
     let ( let@ ) f g r = let_helper (F.fresh ()) f g r
 
@@ -603,7 +603,10 @@ module ShrinkPass (F : R4_Shrink) = struct
   module IDelta = struct
     include IDelta
     let body ty e =
-      F.(define Ty.([] --> ty) (var_of_string "main") (L []) e (endd ()))
+      F.(
+        define
+          (R3_Types.Fn ([], Ty.reflect ty))
+          (var_of_string "main") (L []) e (endd ()))
   end
 end
 module Shrink (F : R4_Shrink) : R4 with type 'a obs = 'a F.obs = struct
@@ -670,19 +673,18 @@ module R4_Annotate_Types (F : R4_Shrink) = struct
     (rty, F.has_type (F.app e es) rty)
 
   let rec add_param_types : type r.
-      'a -> r VarHList.hlist -> r Ty.TyLimitList.HList.hlist -> unit =
+      'a -> r VarHList.hlist -> R3_Types.typ list -> unit =
    fun table vars tys ->
     match (vars, tys) with
     | v :: vs, t :: ts ->
-      StringHashtbl.add table (F.string_of_var v) (Ty.reflect t);
+      StringHashtbl.add table (F.string_of_var v) t;
       add_param_types table vs ts
-    | [], [] -> ()
+    | _ -> ()
   let add_param_types_limit (type r) table (vars : r VarLimitList.limit)
-      (tys : r Ty.TyLimitList.limit) =
-    match (vars, tys) with
-    | LX (vs, _), LX (ts, _) -> add_param_types table vs ts
-    | L vs, L ts -> add_param_types table vs ts
-    | _, _ -> failwith "This can never happen"
+      (tys : R3_Types.typ list) =
+    match vars with
+    | LX (vs, _) -> add_param_types table vs tys
+    | L vs -> add_param_types table vs tys
 
   let rec remove_param_types : type r.
       'a StringHashtbl.t -> r VarHList.hlist -> unit =
@@ -697,8 +699,13 @@ module R4_Annotate_Types (F : R4_Shrink) = struct
     | LX (l, _) -> remove_param_types table l
     | L l -> remove_param_types table l
 
-  let define (Ty.Fn (params, _) as ty) v vs body rest m =
-    StringHashtbl.add m (F.string_of_var v) (Ty.reflect ty);
+  let define ty v vs body rest m =
+    let params =
+      match ty with
+      | R3_Types.Fn (params, _) -> params
+      | _ -> failwith "Expected define type to be a function type"
+    in
+    StringHashtbl.add m (F.string_of_var v) ty;
     let rest = rest m in
     add_param_types_limit m vs params;
     let _, body = body m in
@@ -826,22 +833,26 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
     let blocks = List.of_seq @@ Hashtbl.to_seq block_map in
     let start_block = fresh_block "start" in
     let blocks = (start_block, start_body) :: blocks in
-    let (Ty.Fn (tys, _)) = ty in
+    let tys =
+      match ty with
+      | R3_Types.Fn (tys, _) -> tys
+      | _ -> failwith "Expected define to have function type"
+    in
     let rec param_locals : type r.
-        r Ty.TyLimitList.HList.hlist * r VarHList.hlist ->
-        (string * R3_Types.typ) list = function
-      | t :: ts, v :: vs ->
-        (F.string_of_var v, Ty.reflect t) :: param_locals (ts, vs)
-      | [], [] -> []
+        R3_Types.typ list * r VarHList.hlist -> (string * R3_Types.typ) list =
+      function
+      | t :: ts, v :: vs -> (F.string_of_var v, t) :: param_locals (ts, vs)
+      | _ -> []
     in
     let param_locals : type r.
-        r Ty.TyLimitList.limit * r VarLimitList.limit ->
-        (string * R3_Types.typ) list = function
-      | LX (ts, _), LX (vs, _) -> param_locals (ts, vs)
-      | L ts, L vs -> param_locals (ts, vs)
-      | _ -> failwith "This cannot happen"
+        R3_Types.typ list ->
+        r VarLimitList.limit ->
+        (string * R3_Types.typ) list =
+     fun ts -> function
+       | LX (vs, _) -> param_locals (ts, vs)
+       | L vs -> param_locals (ts, vs)
     in
-    let locals = param_locals (tys, vs) in
+    let locals = param_locals tys vs in
     C3.define ~locals (F.string_of_var v) (List.map fst locals) blocks
     :: rest ()
   let body _ _ () =
