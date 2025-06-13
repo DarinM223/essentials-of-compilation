@@ -12,4 +12,6 @@ example/example5
 example/example5.o
 example/example6
 example/example6.o
+example/example7
+example/example7.o
 c/runtime.o

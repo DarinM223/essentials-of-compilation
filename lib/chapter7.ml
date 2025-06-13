@@ -351,10 +351,7 @@ module RevealFunctions (F : F2) : R5_Shrink with type 'a obs = 'a F.obs = struct
   include M.IDelta
   let var v is_function =
     if StringHashtbl.mem is_function (F.string_of_var v) then
-      let tmp = F.fresh () in
-      F.lett tmp
-        (F.fun_ref (F.string_of_var v))
-        (F.unsafe_vector [ F.string_of_var tmp ])
+      F.unsafe_vector [ F.string_of_var v ]
     else
       F.var v
   let define ty v params body rest is_function =
@@ -497,7 +494,10 @@ module ExposeAllocationPass (F : F2_Collect) = struct
         (* For every field set to the corresponding expression with unsafe_vector_set *)
         let rec go i = function
           | v :: vs ->
-            (* First argument in closure is a function reference, so need to use fun_ref for it *)
+            (* First argument in closure is a function reference, so need to use fun_ref for it
+               We only expand out fun_ref here because annotate types extends the function type
+               to include the closure parameters.
+             *)
             let e =
               if Int.equal i 0 then fun_ref v else var (var_of_string v)
             in
@@ -571,6 +571,8 @@ end
 
 module Ex (F : R5_Let) = struct
   open F
+
+  (* res should be 42 *)
   let res =
     observe @@ program
     @@
@@ -596,7 +598,7 @@ let%expect_test "Example RemoveLet & Shrink" =
     (define (tmp0 tmp2 tmp1)
       (let ([tmp3 4]) (vector tmp6 tmp1 tmp3)))
     (define (main tmp13)
-      (let ([tmp8 (let ([tmp7 (let ([tmp14 (fun-ref tmp0)]) (vector tmp14))]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (let ([tmp15 (fun-ref tmp0)]) (vector tmp15))]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
+      (let ([tmp8 (let ([tmp7 (vector tmp0)]) ((vector-ref (var tmp7) 0) (var tmp7) 5))]) (let ([tmp10 (let ([tmp9 (vector tmp0)]) ((vector-ref (var tmp9) 0) (var tmp9) 3))]) (+ (let ([tmp12 (var tmp8)]) ((vector-ref (var tmp12) 0) (var tmp12) 11)) (let ([tmp11 (var tmp10)]) ((vector-ref (var tmp11) 0) (var tmp11) 15))))))
     )
     |}]
 
@@ -612,7 +614,7 @@ let%expect_test "Example Annotate Types" =
     (define (tmp0 tmp2 tmp1)
       (has-type (let ([tmp3 (has-type 4 Int)]) (has-type (vector tmp6 tmp1 tmp3) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))
     (define (main tmp13)
-      (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (let ([tmp14 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (vector tmp14) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (let ([tmp15 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (vector tmp15) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
+      (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (vector tmp0) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (vector tmp0) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
     )
     |}]
 
@@ -630,9 +632,9 @@ let%expect_test "Example Expose Allocation & Remove Complex" =
     (define (tmp6 tmp5 tmp4)
       (has-type (let ([tmp1 (has-type (vector-ref (has-type (var tmp5) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 1) Int)]) (has-type (let ([tmp3 (has-type (vector-ref (has-type (var tmp5) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 2) Int)]) (has-type (+ (has-type (+ (has-type (var tmp1) Int) (has-type (var tmp3) Int)) Int) (has-type (var tmp4) Int)) Int)) Int)) Int))
     (define (tmp0 tmp2 tmp1)
-      (has-type (let ([tmp3 (has-type 4 Int)]) (has-type (let ([tmp26 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 32 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 32) Int)) Void)]) (has-type (let ([tmp22 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))]) (has-type (let ([tmp25 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 0 (has-type (fun-ref tmp6) (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)))) Void)]) (has-type (let ([tmp24 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 1 (has-type (var tmp1) Int)) Void)]) (has-type (let ([tmp23 (has-type (vector-set! (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 2 (has-type (var tmp3) Int)) Void)]) (has-type (var tmp22) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))
+      (has-type (let ([tmp3 (has-type 4 Int)]) (has-type (let ([tmp24 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 32 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 32) Int)) Void)]) (has-type (let ([tmp20 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))]) (has-type (let ([tmp23 (has-type (vector-set! (has-type (var tmp20) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 0 (has-type (fun-ref tmp6) (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)))) Void)]) (has-type (let ([tmp22 (has-type (vector-set! (has-type (var tmp20) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 1 (has-type (var tmp1) Int)) Void)]) (has-type (let ([tmp21 (has-type (vector-set! (has-type (var tmp20) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) 2 (has-type (var tmp3) Int)) Void)]) (has-type (var tmp20) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))
     (define (main tmp13)
-      (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (let ([tmp14 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (let ([tmp18 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp16 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp17 (has-type (vector-set! (has-type (var tmp16) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (fun-ref tmp14) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp16) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (let ([tmp15 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))]) (has-type (let ([tmp21 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp19 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp20 (has-type (vector-set! (has-type (var tmp19) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (fun-ref tmp15) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp19) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
+      (has-type (let ([tmp8 (has-type (let ([tmp7 (has-type (let ([tmp16 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp14 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp15 (has-type (vector-set! (has-type (var tmp14) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp14) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp7) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 5 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (let ([tmp10 (has-type (let ([tmp9 (has-type (let ([tmp19 (has-type (if (has-type (< (has-type (+ (has-type (global-value free_ptr) Int) (has-type 16 Int)) Int) (has-type (global-value fromspace_end) Int)) Bool) (has-type (void) Void) (has-type (collect 16) Int)) Void)]) (has-type (let ([tmp17 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type (let ([tmp18 (has-type (vector-set! (has-type (var tmp17) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) Void)]) (has-type (var tmp17) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))]) (has-type ((has-type (vector-ref (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int))))) (has-type (var tmp9) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (has-type 3 Int)) (Vector [(Fn ([<cycle>; Int], Int))]))) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type (+ (has-type (let ([tmp12 (has-type (var tmp8) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp12) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 11 Int)) Int)) Int) (has-type (let ([tmp11 (has-type (var tmp10) (Vector [(Fn ([<cycle>; Int], Int))]))]) (has-type ((has-type (vector-ref (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) 0) (Fn ([(Vector [<cycle>]); Int], Int))) (has-type (var tmp11) (Vector [(Fn ([<cycle>; Int], Int))])) (has-type 15 Int)) Int)) Int)) Int)) Int)) Int))
     )
     |}]
 
@@ -652,22 +654,22 @@ let%expect_test "Example Explicate Control" =
   [%expect
     {|
     Ex: (program
-    (define ((locals . ((tmp5 . (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (tmp4 . Int)))) tmp6 tmp5 tmp4 (start0 . (seq (assign tmp1 (has-type (vector-ref tmp5 1) Int)) (seq (assign tmp3 (has-type (vector-ref tmp5 2) Int)) (seq (assign tmp29 (has-type (+ tmp1 tmp3) Int)) (return (has-type (+ tmp29 tmp4) Int)))))))
-    (define ((locals . ((tmp2 . (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (tmp1 . Int)))) tmp0 tmp2 tmp1 (start6 . (seq (assign tmp3 (has-type 4 Int)) (seq (assign tmp40 (has-type (global-value free_ptr) Int)) (seq (assign tmp41 (has-type 32 Int)) (seq (assign tmp39 (has-type (+ tmp40 tmp41) Int)) (seq (assign tmp42 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp39 tmp42) Bool) block_t4 block_f5)))))))
+    (define ((locals . ((tmp5 . (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (tmp4 . Int)))) tmp6 tmp5 tmp4 (start0 . (seq (assign tmp1 (has-type (vector-ref tmp5 1) Int)) (seq (assign tmp3 (has-type (vector-ref tmp5 2) Int)) (seq (assign tmp27 (has-type (+ tmp1 tmp3) Int)) (return (has-type (+ tmp27 tmp4) Int)))))))
+    (define ((locals . ((tmp2 . (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (tmp1 . Int)))) tmp0 tmp2 tmp1 (start6 . (seq (assign tmp3 (has-type 4 Int)) (seq (assign tmp38 (has-type (global-value free_ptr) Int)) (seq (assign tmp39 (has-type 32 Int)) (seq (assign tmp37 (has-type (+ tmp38 tmp39) Int)) (seq (assign tmp40 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp37 tmp40) Bool) block_t4 block_f5)))))))
     (block_f5 . (goto block_f3))
-    (block_body1 . (seq (assign tmp22 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (seq (assign tmp34 (has-type (fun-ref tmp6) (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)))) (seq (assign tmp25 (has-type (vector-set! tmp22 0 tmp34) Void)) (seq (assign tmp24 (has-type (vector-set! tmp22 1 tmp1) Void)) (seq (assign tmp23 (has-type (vector-set! tmp22 2 tmp3) Void)) (return (has-type tmp22 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))))))))
+    (block_body1 . (seq (assign tmp20 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])) (Vector [(Fn ([<cycle>; Int], Int)); Int; Int]))) (seq (assign tmp32 (has-type (fun-ref tmp6) (Fn ([(Vector [<cycle>; Int; Int]); Int], Int)))) (seq (assign tmp23 (has-type (vector-set! tmp20 0 tmp32) Void)) (seq (assign tmp22 (has-type (vector-set! tmp20 1 tmp1) Void)) (seq (assign tmp21 (has-type (vector-set! tmp20 2 tmp3) Void)) (return (has-type tmp20 (Vector [(Fn ([<cycle>; Int], Int)); Int; Int])))))))))
     (block_t4 . (goto block_t2))
-    (block_t2 . (seq (assign tmp26 (has-type (void) Void)) (goto block_body1)))
+    (block_t2 . (seq (assign tmp24 (has-type (void) Void)) (goto block_body1)))
     (block_f3 . (seq (collect 32) (goto block_body1))))
-    (define ((locals . ((tmp13 . Void)))) main tmp13 (start17 . (seq (assign tmp14 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp70 (has-type (global-value free_ptr) Int)) (seq (assign tmp71 (has-type 16 Int)) (seq (assign tmp69 (has-type (+ tmp70 tmp71) Int)) (seq (assign tmp72 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp69 tmp72) Bool) block_t15 block_f16)))))))
-    (block_t13 . (seq (assign tmp18 (has-type (void) Void)) (goto block_body12)))
+    (define ((locals . ((tmp13 . Void)))) main tmp13 (start17 . (seq (assign tmp68 (has-type (global-value free_ptr) Int)) (seq (assign tmp69 (has-type 16 Int)) (seq (assign tmp67 (has-type (+ tmp68 tmp69) Int)) (seq (assign tmp70 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp67 tmp70) Bool) block_t15 block_f16))))))
+    (block_t13 . (seq (assign tmp16 (has-type (void) Void)) (goto block_body12)))
     (block_t10 . (goto block_t8))
     (block_t15 . (goto block_t13))
     (block_f16 . (goto block_f14))
     (block_f9 . (seq (collect 16) (goto block_body7)))
-    (block_body7 . (seq (assign tmp19 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (seq (assign tmp50 (has-type (fun-ref tmp15) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp20 (has-type (vector-set! tmp19 0 tmp50) Void)) (seq (assign tmp51 (has-type (vector-ref tmp19 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp54 (has-type 3 Int)) (seq (assign tmp10 (has-type (call tmp51 tmp19 tmp54) (Vector [(Fn ([<cycle>; Int], Int))]))) (seq (assign tmp56 (has-type (vector-ref tmp8 0) (Fn ([(Vector [<cycle>]); Int], Int)))) (seq (assign tmp59 (has-type 11 Int)) (seq (assign tmp55 (has-type (call tmp56 tmp8 tmp59) Int)) (seq (assign tmp61 (has-type (vector-ref tmp10 0) (Fn ([(Vector [<cycle>]); Int], Int)))) (seq (assign tmp64 (has-type 15 Int)) (seq (assign tmp60 (has-type (call tmp61 tmp10 tmp64) Int)) (return (has-type (+ tmp55 tmp60) Int)))))))))))))))
-    (block_body12 . (seq (assign tmp16 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (seq (assign tmp44 (has-type (fun-ref tmp14) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp17 (has-type (vector-set! tmp16 0 tmp44) Void)) (seq (assign tmp45 (has-type (vector-ref tmp16 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp48 (has-type 5 Int)) (seq (assign tmp8 (has-type (call tmp45 tmp16 tmp48) (Vector [(Fn ([<cycle>; Int], Int))]))) (seq (assign tmp15 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp66 (has-type (global-value free_ptr) Int)) (seq (assign tmp67 (has-type 16 Int)) (seq (assign tmp65 (has-type (+ tmp66 tmp67) Int)) (seq (assign tmp68 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp65 tmp68) Bool) block_t10 block_f11)))))))))))))
-    (block_t8 . (seq (assign tmp21 (has-type (void) Void)) (goto block_body7)))
+    (block_body7 . (seq (assign tmp17 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (seq (assign tmp48 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp18 (has-type (vector-set! tmp17 0 tmp48) Void)) (seq (assign tmp49 (has-type (vector-ref tmp17 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp52 (has-type 3 Int)) (seq (assign tmp10 (has-type (call tmp49 tmp17 tmp52) (Vector [(Fn ([<cycle>; Int], Int))]))) (seq (assign tmp54 (has-type (vector-ref tmp8 0) (Fn ([(Vector [<cycle>]); Int], Int)))) (seq (assign tmp57 (has-type 11 Int)) (seq (assign tmp53 (has-type (call tmp54 tmp8 tmp57) Int)) (seq (assign tmp59 (has-type (vector-ref tmp10 0) (Fn ([(Vector [<cycle>]); Int], Int)))) (seq (assign tmp62 (has-type 15 Int)) (seq (assign tmp58 (has-type (call tmp59 tmp10 tmp62) Int)) (return (has-type (+ tmp53 tmp58) Int)))))))))))))))
+    (block_body12 . (seq (assign tmp14 (has-type (allocate 1 (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))])) (Vector [(Fn ([<cycle>; Int], (Fn ([Int], Int))))]))) (seq (assign tmp42 (has-type (fun-ref tmp0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp15 (has-type (vector-set! tmp14 0 tmp42) Void)) (seq (assign tmp43 (has-type (vector-ref tmp14 0) (Fn ([(Vector [<cycle>]); Int], (Fn ([Int], Int)))))) (seq (assign tmp46 (has-type 5 Int)) (seq (assign tmp8 (has-type (call tmp43 tmp14 tmp46) (Vector [(Fn ([<cycle>; Int], Int))]))) (seq (assign tmp64 (has-type (global-value free_ptr) Int)) (seq (assign tmp65 (has-type 16 Int)) (seq (assign tmp63 (has-type (+ tmp64 tmp65) Int)) (seq (assign tmp66 (has-type (global-value fromspace_end) Int)) (if (has-type (< tmp63 tmp66) Bool) block_t10 block_f11))))))))))))
+    (block_t8 . (seq (assign tmp19 (has-type (void) Void)) (goto block_body7)))
     (block_f14 . (seq (collect 16) (goto block_body12)))
     (block_f11 . (goto block_f9))))
     |}]
@@ -822,7 +824,6 @@ let%expect_test "Example to X86" =
     start17:
 
       movq %rdi, %rsi
-      leaq tmp0(%rip), %rsi
       movq free_ptr(%rip), %rdx
       movq $16, %rsi
       addq %rsi, %rdx
@@ -852,7 +853,7 @@ let%expect_test "Example to X86" =
       addq $16, free_ptr(%rip)
       movq %rdi, %r11
       movq $3, (%r11)
-      leaq tmp14(%rip), %rsi
+      leaq tmp0(%rip), %rsi
       movq %rdi, %r11
       movq %rsi, 8(%r11)
       movq $0, %rsi
@@ -861,7 +862,6 @@ let%expect_test "Example to X86" =
       movq $5, %rsi
       callq *%rdx
       movq %rax, -8(%r15)
-      leaq tmp0(%rip), %rsi
       movq free_ptr(%rip), %rdx
       movq $16, %rsi
       addq %rsi, %rdx
@@ -891,7 +891,7 @@ let%expect_test "Example to X86" =
       addq $16, free_ptr(%rip)
       movq %rdi, %r11
       movq $3, (%r11)
-      leaq tmp15(%rip), %rsi
+      leaq tmp0(%rip), %rsi
       movq %rdi, %r11
       movq %rsi, 8(%r11)
       movq $0, %rsi
