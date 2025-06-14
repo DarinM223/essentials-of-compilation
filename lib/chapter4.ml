@@ -1,5 +1,5 @@
 module type R2_Shrink = sig
-  include Chapter2_definitions.R1
+  include Chapter2.R1
   val t : bool exp
   val f : bool exp
 
@@ -24,7 +24,7 @@ end
 
 module type R2_Let = sig
   include R2
-  include Chapter2_definitions.R1_Let with type 'a exp := 'a exp
+  include Chapter2.R1_Let with type 'a exp := 'a exp
 end
 
 module R2_Shrink_T
@@ -35,7 +35,7 @@ module R2_Shrink_T
         with type 'a exp = 'a X_exp.from
          and type 'a program = 'a X_program.from) =
 struct
-  include Chapter2_definitions.R1_T (X_exp) (X_program) (F)
+  include Chapter2.R1_T (X_exp) (X_program) (F)
   open X_exp
   let t = fwd F.t
   let f = fwd F.f
@@ -65,7 +65,7 @@ struct
 end
 
 module R2_Shrink_R_T (R : Chapter1.Reader) (F : R2_Shrink) = struct
-  include Chapter2_definitions.R1_R_T (R) (F)
+  include Chapter2.R1_R_T (R) (F)
   let t _ = F.t
   let f _ = F.f
   let not a r = F.not (a r)
@@ -117,7 +117,7 @@ module R2_R_T (R : Chapter1.Reader) (F : R2) = struct
 end
 
 module R2_Shrink_Pretty () = struct
-  include Chapter2_definitions.R1_Pretty ()
+  include Chapter2.R1_Pretty ()
   let t = "t"
   let f = "f"
   let not a = "(not " ^ a ^ ")"
@@ -139,7 +139,7 @@ module R2_Pretty () = struct
 end
 
 module type C1 = sig
-  include Chapter2_definitions.C0
+  include Chapter2.C0
   val t : bool arg
   val f : bool arg
 
@@ -152,7 +152,7 @@ module type C1 = sig
 end
 
 module C1_R_T (R : Chapter1.Reader) (F : C1) = struct
-  include Chapter2_definitions.C0_R_T (R) (F)
+  include Chapter2.C0_R_T (R) (F)
   let t _ = F.t
   let f _ = F.f
   let not a r = F.not (a r)
@@ -163,7 +163,7 @@ module C1_R_T (R : Chapter1.Reader) (F : C1) = struct
 end
 
 module C1_Pretty = struct
-  include Chapter2_definitions.C0_Pretty
+  include Chapter2.C0_Pretty
   let t = "t"
   let f = "f"
   let not a = "(not " ^ a ^ ")"
@@ -185,7 +185,7 @@ module CC = struct
 end
 
 module type X86_1 = sig
-  include Chapter2_definitions.X86_0
+  include Chapter2.X86_0
   val byte_reg : 'b reg -> 'a arg
 
   val xorq : 'a arg -> 'b arg -> unit instr
@@ -206,7 +206,7 @@ module X86_1_R_T (R : Chapter1.Reader) (F : X86_1) :
      and type 'a program = unit -> 'a F.program
      and type label = F.label
      and type 'a obs = 'a F.obs = struct
-  include Chapter2_definitions.X86_0_R_T (R) (F)
+  include Chapter2.X86_0_R_T (R) (F)
   let byte_reg r ctx = F.byte_reg (r ctx)
   let xorq a b ctx = F.xorq (a ctx) (b ctx)
   let cmpq a b ctx = F.cmpq (a ctx) (b ctx)
@@ -231,9 +231,7 @@ module X86_1_T
          and type 'a block = 'a X_block.from
          and type 'a program = 'a X_program.from) =
 struct
-  include
-    Chapter2_definitions.X86_0_T (X_reg) (X_arg) (X_instr) (X_block) (X_program)
-      (F)
+  include Chapter2.X86_0_T (X_reg) (X_arg) (X_instr) (X_block) (X_program) (F)
   let byte_reg reg = X_arg.fwd @@ F.byte_reg @@ X_reg.bwd reg
   let xorq a b = X_instr.fwd @@ F.xorq (X_arg.bwd a) (X_arg.bwd b)
   let cmpq a b = X_instr.fwd @@ F.cmpq (X_arg.bwd a) (X_arg.bwd b)
@@ -245,7 +243,7 @@ struct
 end
 
 module X86_1_Pretty = struct
-  include Chapter2_definitions.X86_0_Pretty
+  include Chapter2.X86_0_Pretty
   let byte_reg reg = "(byte-reg" ^ reg ^ ")"
   let xorq a b = "(xorq" ^ a ^ " " ^ b ^ ")"
   let cmpq a b = "(cmpq " ^ a ^ " " ^ b ^ ")"
@@ -257,7 +255,7 @@ module X86_1_Pretty = struct
 end
 
 module X86_1_Printer_Helper (R : Chapter1.Reader) = struct
-  include Chapter2_passes.X86_0_Printer_Helper (R)
+  include Chapter2.X86_0_Printer_Helper (R)
 
   let byte_reg = function
     | "%rsp" -> "%spl"
@@ -306,10 +304,10 @@ module X86_1_Printer_Helper (R : Chapter1.Reader) = struct
   let label l _ = l ^ ":"
 end
 
-module X86_1_Printer = X86_1_Printer_Helper (Chapter2_passes.X86_Info)
+module X86_1_Printer = X86_1_Printer_Helper (Chapter2.X86_Info)
 
 module TransformLet (F : R2) : R2_Let with type 'a obs = 'a F.obs = struct
-  module M = Chapter2_definitions.TransformLetPass (F)
+  module M = Chapter2.TransformLetPass (F)
   include R2_R_T (M.R) (F)
   include M.IDelta
 end
@@ -340,13 +338,13 @@ end
 
 module RemoveComplex (F : R2_Shrink) : R2_Shrink with type 'a obs = 'a F.obs =
 struct
-  module M = Chapter2_passes.RemoveComplexPass (F)
+  module M = Chapter2.RemoveComplexPass (F)
   include R2_Shrink_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
 
 module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
-  include Chapter2_passes.ExplicateControl (F) (C1) ()
+  include Chapter2.ExplicateControl (F) (C1) ()
 
   let block_map : (string, unit C1.tail) Hashtbl.t = Hashtbl.create 100
   let fresh_block =
@@ -422,7 +420,7 @@ module ExplicateControl (F : R2_Shrink) (C1 : C1) () = struct
 end
 
 module SelectInstructions (F : C1) (X86 : X86_1) = struct
-  include Chapter2_passes.SelectInstructions (F) (X86)
+  include Chapter2.SelectInstructions (F) (X86)
 
   let return e exit_label = X86.jmp exit_label :: e Return
   let t = (None, X86.int 1)
@@ -484,10 +482,10 @@ end
 
 module G = Graph.Imperative.Digraph.Concrete (String)
 module Topsort = Graph.Topological.Make (G)
-module StringHashtbl = Hashtbl.Make (String)
+module StringHashtbl = Chapter2.StringHashtbl
 
 module UncoverLivePass (X86 : X86_1) = struct
-  open Chapter2_definitions
+  open Chapter2
   include Chapter3.UncoverLivePass (X86)
 
   module X_block = struct
@@ -622,7 +620,7 @@ module BuildInterferencePass (X86 : X86_1) = struct
       | None -> X_instr.fwd @@ X86.set cc a
 
     let movzbq (src, a) (dest, b) =
-      let open Chapter2_definitions in
+      let open Chapter2 in
       match dest with
       | Some dest ->
         let acc_graph live_after graph =
@@ -685,7 +683,7 @@ module Ex1 (F : R2_Let) = struct
 end
 
 module PatchInstructionsPass (X86 : X86_1) = struct
-  include Chapter2_passes.PatchInstructionsPass (X86)
+  include Chapter2.PatchInstructionsPass (X86)
   module IDelta = struct
     include IDelta
     open ArgInfo

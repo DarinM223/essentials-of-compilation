@@ -1,5 +1,7 @@
 module Ty = Chapter6.Ty
 module StringHashtbl = Chapter6.StringHashtbl
+module StringSet = Chapter2.StringSet
+module StringMap = Chapter6.StringMap
 module R3_Types = struct
   include Chapter5.R3_Types
 
@@ -13,8 +15,6 @@ module R3_Types = struct
       let rec ty = Vector [ Fn (ty :: params, ret) ] in
       ty
 end
-module StringSet = Chapter2_definitions.StringSet
-module StringMap = Chapter6.StringMap
 
 module type CLOSURE = sig
   module Limit : Chapter6.LIMIT
@@ -58,7 +58,7 @@ module type R5 = sig
 end
 
 module type R5_Let = sig
-  include Chapter2_definitions.R1_Let
+  include Chapter2.R1_Let
   include Chapter6.R4_Let
   include
     R5

@@ -1,5 +1,9 @@
-module StringHashtbl = Chapter2_passes.StringHashtbl
-module StringMap = Chapter2_definitions.StringMap
+module StringHashtbl = Chapter2.StringHashtbl
+module StringMap = Chapter2.StringMap
+module ArgSet = Chapter2.ArgSet
+module ArgMap = Chapter2.ArgMap
+module X86_Info = Chapter2.X86_Info
+module GraphUtils = Chapter3.GraphUtils
 
 type (_, _) ptr =
   | Here : ('a, 'a * _) ptr
@@ -18,9 +22,6 @@ module type HLIST = sig
   type _ hlist =
     | [] : unit hlist
     | ( :: ) : 'a el * 'b hlist -> ('a * 'b) hlist
-  val proj : 'r hlist -> ('a, 'r) ptr -> 'a el
-  val replace : 'r hlist -> ('a, 'r) ptr -> 'a el -> 'r hlist
-  val length : 'r hlist -> int
 end
 
 module HListFn (E : sig
@@ -31,28 +32,6 @@ struct
   type _ hlist =
     | [] : unit hlist
     | ( :: ) : 'a el * 'b hlist -> ('a * 'b) hlist
-
-  let rec proj : type a r. r hlist -> (a, r) ptr -> a el =
-   fun l n ->
-    match (l, n) with
-    | x :: _, Here -> x
-    | _ :: xs, Next n -> proj xs n
-    | [], _ -> . (* Refutation case *)
-
-  let rec replace : type a r. r hlist -> (a, r) ptr -> a el -> r hlist =
-   fun l n e ->
-    match (l, n) with
-    | _ :: xs, Here -> e :: xs
-    | x :: xs, Next n -> x :: replace xs n e
-    | [], _ -> .
-
-  let length l =
-    let rec go : type r. int -> r hlist -> int =
-     fun acc -> function
-       | _ :: xs -> go (acc + 1) xs
-       | [] -> acc
-    in
-    go 0 l
 end
 
 module R3_Types = struct
@@ -157,7 +136,7 @@ end
 
 module type R3_Let = sig
   include R3
-  include Chapter2_definitions.R1_Let with type 'a exp := 'a exp
+  include Chapter2.R1_Let with type 'a exp := 'a exp
 end
 
 module R2_Shrink_AnnotateTypes (F : Chapter4.R2_Shrink) :
@@ -383,7 +362,7 @@ struct
 end
 
 module TransformLet (F : R3) : R3_Let with type 'a obs = 'a F.obs = struct
-  module M = Chapter2_definitions.TransformLetPass (F)
+  module M = Chapter2.TransformLetPass (F)
   include R3_R_T (M.R) (F)
   include M.IDelta
 end
@@ -396,7 +375,7 @@ end
 
 module RemoveComplex (F : R3_Collect) : R3_Collect with type 'a obs = 'a F.obs =
 struct
-  module M = Chapter2_passes.RemoveComplexPass (F)
+  module M = Chapter2.RemoveComplexPass (F)
   include R3_Collect_T (M.X) (M.X_program) (F)
   include M.IDelta
 end
@@ -505,7 +484,7 @@ end
 
 module type X86_2 = sig
   include Chapter4.X86_1
-  open Chapter2_definitions
+  open Chapter2
   val global_value : string -> 'a arg
   val program :
     ?locals:R3_Types.typ StringMap.t ->
@@ -693,9 +672,6 @@ module UncoverLive (F : X86_2) : X86_2 with type 'a obs = 'a F.obs = struct
     F.program ?locals ?stack_size ?root_stack_size ?conflicts ?moves blocks
 end
 
-module ArgSet = Chapter2_definitions.ArgSet
-module ArgMap = Chapter2_definitions.ArgMap
-module GraphUtils = Chapter3.GraphUtils
 module BuildInterferencePass (X86 : X86_2) = struct
   include Chapter4.BuildInterferencePass (X86_1_of_X86_2 (X86))
   module IDelta = struct
@@ -703,7 +679,7 @@ module BuildInterferencePass (X86 : X86_2) = struct
 
     let callee_saves = X86.[ rbx; r12; r13; r14; r15 ]
 
-    include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
+    include Chapter2.X86_Reg_String (X86_1_of_X86_2 (X86))
 
     let build_interference_graph locals blocks =
       let interference_graph =
@@ -776,7 +752,7 @@ module AllocateRegistersPass (X86 : X86_2) = struct
   include Chapter3.AllocateRegistersPass (X86_1_of_X86_2 (X86))
   module IDelta = struct
     include IDelta
-    open Chapter2_definitions
+    open Chapter2
     let reg_of_color root_stack_size stack_size color_slot_table regs typ color
         =
       if color < Array.length regs then
@@ -787,7 +763,7 @@ module AllocateRegistersPass (X86 : X86_2) = struct
           spill root_stack_size color_slot_table X86.r15 color
         | _ -> spill stack_size color_slot_table X86.rbp color
 
-    include Chapter2_definitions.X86_Reg_String (X86_1_of_X86_2 (X86))
+    include Chapter2.X86_Reg_String (X86_1_of_X86_2 (X86))
 
     let program_helper locals conflicts moves blocks =
       let root_stack_size = ref 0 in
@@ -934,7 +910,6 @@ module X86_2_Pretty = struct
     program_helper info body
 end
 
-module X86_Info = Chapter2_passes.X86_Info
 module X86_2_Printer_Helper (R : Chapter1.Reader) = struct
   include Chapter4.X86_1_Printer_Helper (R)
 
@@ -975,7 +950,7 @@ module X86_2_Printer_Helper (R : Chapter1.Reader) = struct
     @ program_helper stack_size root_stack_size blocks
 end
 
-module X86_2_Printer = X86_2_Printer_Helper (Chapter2_passes.X86_Info)
+module X86_2_Printer = X86_2_Printer_Helper (Chapter2.X86_Info)
 
 module Ex0 (F : R3_Let) = struct
   open F

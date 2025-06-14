@@ -1,4 +1,4 @@
-open Chapter2_definitions
+open Chapter2
 
 module UncoverLivePass (X86 : X86_0) = struct
   module X_reg = Chapter1.MkId (struct
@@ -199,7 +199,7 @@ module BuildInterferencePass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
   module IDelta = struct
-    include Chapter2_definitions.X86_Reg_String (X86)
+    include Chapter2.X86_Reg_String (X86)
     let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
 
@@ -346,7 +346,7 @@ module BuildMovesPass (X86 : X86_0) = struct
     type 'a t = 'a X86.program
   end)
   module IDelta = struct
-    include Chapter2_definitions.X86_Reg_String (X86)
+    include Chapter2.X86_Reg_String (X86)
     let arg_of_reg reg = Arg.Reg (string_of_reg reg)
     let reg r = (Some (arg_of_reg r), X86.reg r)
     let var v = (Some (Arg.Var v), X86.var v)
@@ -404,7 +404,7 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       else
         spill stack_size color_slot_table X86.rbp color
 
-    include Chapter2_definitions.X86_Reg_String (X86)
+    include Chapter2.X86_Reg_String (X86)
 
     let program ?stack_size:_ ?(conflicts = ArgMap.empty)
         ?(moves = ArgMap.empty) blocks () =
@@ -440,7 +440,7 @@ end
 module AllocateRegisters (X86 : X86_0) : X86_0 with type 'a obs = 'a X86.obs =
 struct
   module M = AllocateRegistersPass (X86)
-  include Chapter2_definitions.X86_0_R_T (M.X_reader) (X86)
+  include Chapter2.X86_0_R_T (M.X_reader) (X86)
   include M.IDelta
 end
 
@@ -563,7 +563,6 @@ let%expect_test "Example 1 after build interference" =
     |}]
 
 let%expect_test "Example 1 after allocate registers" =
-  let open Chapter2_passes in
   let module M =
     Ex1 (UncoverLive (BuildInterference (AllocateRegisters (X86_0_Printer)))) in
   print_endline M.res;
@@ -603,7 +602,6 @@ let%expect_test "Example 1 after allocate registers" =
     |}]
 
 let%expect_test "Example 1 after allocate registers with move biasing" =
-  let open Chapter2_passes in
   let module M =
     Ex1
       (UncoverLive
@@ -647,7 +645,6 @@ let%expect_test "Example 1 after allocate registers with move biasing" =
 let%expect_test
     "Example 1 after allocate registers with move biasing and patching \
      instructions" =
-  let open Chapter2_passes in
   let module M =
     Ex1
       (UncoverLive

@@ -1,7 +1,10 @@
-module StringMap = Map.Make (String)
-module StringHashtbl = Hashtbl.Make (String)
-module ArgSet = Chapter2_definitions.ArgSet
-module ArgMap = Chapter2_definitions.ArgMap
+module StringSet = Chapter2.StringSet
+module StringMap = Chapter2.StringMap
+module StringHashtbl = Chapter2.StringHashtbl
+module ArgSet = Chapter2.ArgSet
+module ArgMap = Chapter2.ArgMap
+module X86_Info = Chapter2.X86_Info
+module R3_Types = Chapter5.R3_Types
 
 module type LIMIT = sig
   module HList : Chapter5.HLIST
@@ -43,8 +46,6 @@ module LimitFn (HList : Chapter5.HLIST) = struct
     | LX ([ a; b; c; d; e; _ ], f :: g) -> a :: b :: c :: d :: e :: f :: g
     | L l -> l
 end
-
-module R3_Types = Chapter5.R3_Types
 
 module rec TyHList : (Chapter5.HLIST with type 'a el = 'a Ty.ty) =
 Chapter5.HListFn (struct
@@ -150,7 +151,7 @@ end) : FN_HLIST with type ('a, 'b) el = ('a, 'b) E.t = struct
 end
 
 module type R4_Let = sig
-  include Chapter2_definitions.R1_Let
+  include Chapter2.R1_Let
   include R4 with type 'a exp := 'a exp and type 'a var := 'a var
   module UnitHList : Chapter5.HLIST with type 'a el = unit
 
@@ -463,9 +464,8 @@ struct
   let program defs = X_program.fwd @@ F.program @@ List.map X_def.bwd defs
 end
 
-module StringSet = Chapter2_definitions.StringSet
 module TransformLetPass (F : R4) = struct
-  include Chapter2_definitions.TransformLetPass (R3_of_R4 (F))
+  include Chapter2.TransformLetPass (R3_of_R4 (F))
   module R = struct
     type t = {
       mutable to_exp : 'a. string -> 'a F.exp;
@@ -752,7 +752,7 @@ struct
 end
 
 module RemoveComplexPass (F : F1_Collect) = struct
-  include Chapter2_passes.RemoveComplexPass (R3_of_F1_Collect (F))
+  include Chapter2.RemoveComplexPass (R3_of_F1_Collect (F))
   module X_def = Chapter1.MkId (struct
     type 'a t = 'a F.def
   end)
@@ -1197,7 +1197,6 @@ module X86_3_Pretty = struct
   let program = String.concat "\n"
 end
 
-module X86_Info = Chapter2_passes.X86_Info
 module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
   X86_3 with type 'a obs = string = struct
   include Chapter5.X86_2_Printer_Helper (R)
