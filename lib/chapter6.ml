@@ -1238,6 +1238,35 @@ end
 
 module X86_3_Printer = X86_3_Printer_Helper (X86_Info)
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R4_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (Shrink
+          (RevealFunctions
+             (ExposeAllocation
+                (RemoveComplex
+                   (F1_Collect_Annotate_Types
+                      (ExplicateControl
+                         (F1_Collect_Pretty ())
+                         (UncoverLocals
+                            (SelectInstructions
+                               (C3_Pretty)
+                               (UncoverLive
+                                  (BuildInterference
+                                     (BuildMoves
+                                        (AllocateRegisters
+                                           (PatchInstructions (X86_3_Printer))))))))
+                         ())))))))
+
 module Ex1 (F : R4_Let) = struct
   open F
 
@@ -1434,35 +1463,6 @@ let%expect_test "Example 1 ExplicateControl & UncoverLocals" =
     (block_t8 . (seq (assign tmp8 (void)) (goto block_body7)))
     (block_f11 . (goto block_f9))))
     |}]
-
-module Compiler
-    (T : sig
-      type t
-    end)
-    (F : functor
-      (F : R4_Let)
-      -> sig
-      val res : T.t F.obs
-    end)
-    () =
-  F
-    (TransformLet
-       (Shrink
-          (RevealFunctions
-             (ExposeAllocation
-                (RemoveComplex
-                   (F1_Collect_Annotate_Types
-                      (ExplicateControl
-                         (F1_Collect_Pretty ())
-                         (UncoverLocals
-                            (SelectInstructions
-                               (C3_Pretty)
-                               (UncoverLive
-                                  (BuildInterference
-                                     (BuildMoves
-                                        (AllocateRegisters
-                                           (PatchInstructions (X86_3_Printer))))))))
-                         ())))))))
 
 let%expect_test
     "Example 1 SelectInstructions & Uncover Live & Allocate Registers" =

@@ -718,6 +718,30 @@ module PatchInstructions (F : X86_1) = struct
   include M.IDelta
 end
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R2_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (Shrink
+          (RemoveComplex
+             (ExplicateControl
+                (R2_Shrink_Pretty ())
+                (SelectInstructions
+                   (C1_Pretty)
+                   (UncoverLive
+                      (BuildInterference
+                         (BuildMoves
+                            (AllocateRegisters (PatchInstructions (X86_1_Printer)))))))
+                ()))))
+
 module Ex2 (F : R2_Let) = struct
   open F
   let res =
@@ -1021,21 +1045,7 @@ let%expect_test "Uncover live" =
     |}]
 
 let%expect_test "Allocate Registers" =
-  let module M =
-    Ex6
-      (TransformLet
-         (Shrink
-            (RemoveComplex
-               (ExplicateControl
-                  (R2_Shrink_Pretty ())
-                  (SelectInstructions
-                     (C1_Pretty)
-                     (UncoverLive
-                        (BuildInterference
-                           (BuildMoves
-                              (AllocateRegisters
-                                 (PatchInstructions (X86_1_Printer)))))))
-                  ())))) in
+  let module M = Compiler (Int) (Ex6) () in
   print_endline M.res;
   [%expect
     {|

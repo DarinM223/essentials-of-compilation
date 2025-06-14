@@ -960,6 +960,26 @@ end
 
 module X86_0_Printer = X86_0_Printer_Helper (X86_Info)
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R1_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (ExplicateControl
+          (R1_Pretty ())
+          (SelectInstructions
+             (UncoverLocals
+                (C0_Pretty))
+                (AssignHomes (PatchInstructions (X86_0_Printer))))
+          ()))
+
 module Ex1 (F : R1_Let) = struct
   open F
 
@@ -1151,16 +1171,7 @@ let%expect_test "Example 6 patch instructions" =
     |}]
 
 let%expect_test "Example 6 final printed X86" =
-  let module M =
-    Ex6
-      (TransformLet
-         (ExplicateControl
-            (R1_Pretty ())
-            (SelectInstructions
-               (UncoverLocals
-                  (C0_Pretty))
-                  (AssignHomes (PatchInstructions (X86_0_Printer))))
-            ())) in
+  let module M = Compiler (Int) (Ex6) () in
   print_endline M.res;
   [%expect
     {|

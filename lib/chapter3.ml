@@ -444,6 +444,29 @@ struct
   include M.IDelta
 end
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R1_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (ExplicateControl
+          (R1_Pretty ())
+          (SelectInstructions
+             (UncoverLocals
+                (C0_Pretty))
+                (UncoverLive
+                   (BuildInterference
+                      (BuildMoves
+                         (AllocateRegisters (PatchInstructions (X86_0_Printer)))))))
+          ()))
+
 module Ex1 (F : X86_0) = struct
   open F
 
@@ -674,6 +697,36 @@ let%expect_test
       negq %rdx
       movq %rsi, %rax
       addq %rdx, %rax
+      popq %r14
+      popq %r13
+      popq %rbx
+      popq %r12
+      movq %rbp, %rsp
+      popq %rbp
+      retq
+    |}]
+
+let%expect_test "Example 6 from chapter 2 allocate registers" =
+  let module M = Compiler (Int) (Chapter2.Ex6) () in
+  print_endline M.res;
+  [%expect
+    {|
+    .global main
+    .text
+    main:
+      pushq %rbp
+      movq %rsp, %rbp
+      pushq %r12
+      pushq %rbx
+      pushq %r13
+      pushq %r14
+      subq $0, %rsp
+    start:
+
+      movq $20, %rsi
+      movq $22, %rdx
+      addq %rdx, %rsi
+      movq %rsi, %rax
       popq %r14
       popq %r13
       popq %rbx

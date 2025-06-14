@@ -569,6 +569,36 @@ module F2_Collect_Pretty () = struct
   include F2_Pretty ()
 end
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R5_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (Shrink
+          (RevealFunctions
+             (ExposeAllocation
+                (RemoveComplex
+                   (F2_Collect_Annotate_Types
+                      (ExplicateControl
+                         (F2_Collect_Pretty ())
+                         (Chapter6.UncoverLocals
+                            (Chapter6.SelectInstructions
+                               (Chapter6.C3_Pretty)
+                               (Chapter6.UncoverLive
+                                  (Chapter6.BuildInterference
+                                     (Chapter6.BuildMoves
+                                        (Chapter6.AllocateRegisters
+                                           (Chapter6.PatchInstructions
+                                              (Chapter6.X86_3_Printer))))))))
+                         ())))))))
+
 module Ex (F : R5_Let) = struct
   open F
 
@@ -673,36 +703,6 @@ let%expect_test "Example Explicate Control" =
     (block_f14 . (seq (collect 16) (goto block_body12)))
     (block_f11 . (goto block_f9))))
     |}]
-
-module Compiler
-    (T : sig
-      type t
-    end)
-    (F : functor
-      (F : R5_Let)
-      -> sig
-      val res : T.t F.obs
-    end)
-    () =
-  F
-    (TransformLet
-       (Shrink
-          (RevealFunctions
-             (ExposeAllocation
-                (RemoveComplex
-                   (F2_Collect_Annotate_Types
-                      (ExplicateControl
-                         (F2_Collect_Pretty ())
-                         (Chapter6.UncoverLocals
-                            (Chapter6.SelectInstructions
-                               (Chapter6.C3_Pretty)
-                               (Chapter6.UncoverLive
-                                  (Chapter6.BuildInterference
-                                     (Chapter6.BuildMoves
-                                        (Chapter6.AllocateRegisters
-                                           (Chapter6.PatchInstructions
-                                              (Chapter6.X86_3_Printer))))))))
-                         ())))))))
 
 let%expect_test "Example to X86" =
   let module M = Compiler (Int) (Ex) () in

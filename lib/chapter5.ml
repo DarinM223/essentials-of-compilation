@@ -952,6 +952,34 @@ end
 
 module X86_2_Printer = X86_2_Printer_Helper (Chapter2.X86_Info)
 
+module Compiler
+    (T : sig
+      type t
+    end)
+    (F : functor
+      (F : R3_Let)
+      -> sig
+      val res : T.t F.obs
+    end)
+    () =
+  F
+    (TransformLet
+       (Shrink
+          (ExposeAllocation
+             (RemoveComplex
+                (R3_Collect_Annotate_Types
+                   (ExplicateControl
+                      (R3_Collect_Pretty ())
+                      (UncoverLocals
+                         (SelectInstructions
+                            (C2_Pretty)
+                            (UncoverLive
+                               (BuildInterference
+                                  (BuildMoves
+                                     (AllocateRegisters
+                                        (PatchInstructions (X86_2_Printer))))))))
+                      ()))))))
+
 module Ex0 (F : R3_Let) = struct
   open F
   let res =
@@ -1096,24 +1124,7 @@ let%expect_test "Tag for vector 1" =
   [%expect {| Tag: 0b1001010001101 |}]
 
 let%expect_test "Ex2 allocate registers" =
-  let module M =
-    Ex2
-      (TransformLet
-         (Shrink
-            (ExposeAllocation
-               (RemoveComplex
-                  (R3_Collect_Annotate_Types
-                     (ExplicateControl
-                        (R3_Collect_Pretty ())
-                        (UncoverLocals
-                           (SelectInstructions
-                              (C2_Pretty)
-                              (UncoverLive
-                                 (BuildInterference
-                                    (BuildMoves
-                                       (AllocateRegisters
-                                          (PatchInstructions (X86_2_Printer))))))))
-                        ())))))) in
+  let module M = Compiler (Int) (Ex2) () in
   print_endline M.res;
   [%expect
     {|
