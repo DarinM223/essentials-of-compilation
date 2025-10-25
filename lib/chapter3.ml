@@ -99,8 +99,7 @@ module GraphUtils = struct
   module IntSet = Set.Make (Int)
   module ArgTable = Hashtbl.Make (Arg)
   let add_interference k v graph =
-    if k = v then
-      graph
+    if k = v then graph
     else
       let update k v graph =
         let go = function
@@ -130,10 +129,8 @@ module GraphUtils = struct
       let compare_by_saturation a b =
         let a_saturation = IntSet.cardinal (saturation color_table graph a) in
         let b_saturation = IntSet.cardinal (saturation color_table graph b) in
-        if a_saturation = b_saturation then
-          Arg.compare a b
-        else
-          Int.compare a_saturation b_saturation
+        if a_saturation = b_saturation then Arg.compare a b
+        else Int.compare a_saturation b_saturation
 
       let compare a b =
         match (a, b) with
@@ -148,10 +145,8 @@ module GraphUtils = struct
         let u = Worklist.(max_elt (of_list worklist)) in
         let adjacent_colors = saturation color_table graph u in
         let rec find_color color =
-          if IntSet.mem color adjacent_colors then
-            find_color (color + 1)
-          else
-            color
+          if IntSet.mem color adjacent_colors then find_color (color + 1)
+          else color
         in
         let biased_colors =
           IntSet.filter
@@ -159,10 +154,8 @@ module GraphUtils = struct
             (saturation color_table moves u)
         in
         let c =
-          if IntSet.is_empty biased_colors then
-            find_color 0
-          else
-            IntSet.min_elt biased_colors
+          if IntSet.is_empty biased_colors then find_color 0
+          else IntSet.min_elt biased_colors
         in
         ArgTable.add color_table u c;
         go (remove_list u worklist)
@@ -236,10 +229,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
         let acc_graph live_after graph =
           ArgSet.fold
             (fun v graph ->
-              if Some v = src || v = dest then
-                graph
-              else
-                GraphUtils.add_interference dest v graph)
+              if Some v = src || v = dest then graph
+              else GraphUtils.add_interference dest v graph)
             live_after graph
         in
         (acc_graph, X86.movq a b)
@@ -251,10 +242,7 @@ module BuildInterferencePass (X86 : X86_0) = struct
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
           let* v = ArgSet.to_list live_after in
-          if v <> arg_of_reg r then
-            [ (arg_of_reg r, v) ]
-          else
-            []
+          if v <> arg_of_reg r then [ (arg_of_reg r, v) ] else []
         in
         List.fold_left
           (fun graph (k, v) -> GraphUtils.add_interference k v graph)
@@ -292,10 +280,8 @@ module BuildInterferencePass (X86 : X86_0) = struct
       let conflicts =
         let* a = regs in
         let* b = regs in
-        if arg_of_reg a = arg_of_reg b then
-          []
-        else
-          [ (arg_of_reg a, arg_of_reg b) ]
+        if arg_of_reg a = arg_of_reg b then []
+        else [ (arg_of_reg a, arg_of_reg b) ]
       in
       List.fold_left
         (fun acc (a, b) -> GraphUtils.add_interference a b acc)
@@ -399,10 +385,8 @@ module AllocateRegistersPass (X86 : X86_0) = struct
       X86.deref reg slot
 
     let reg_of_color stack_size color_slot_table regs color =
-      if color < Array.length regs then
-        X86.reg regs.(color)
-      else
-        spill stack_size color_slot_table X86.rbp color
+      if color < Array.length regs then X86.reg regs.(color)
+      else spill stack_size color_slot_table X86.rbp color
 
     include Chapter2.X86_Reg_String (X86)
 

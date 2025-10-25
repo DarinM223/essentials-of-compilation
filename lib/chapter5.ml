@@ -66,8 +66,7 @@ module R3_Types = struct
       | Bool -> Format.fprintf fmt "Bool"
       | Void -> Format.fprintf fmt "Void"
       | Vector typs ->
-        if TypTable.mem table ty then
-          Format.fprintf fmt "<cycle>"
+        if TypTable.mem table ty then Format.fprintf fmt "<cycle>"
         else begin
           TypTable.add table ty ();
           Format.fprintf fmt "(Vector [";
@@ -75,8 +74,7 @@ module R3_Types = struct
           Format.fprintf fmt "])"
         end
       | Fn (params, ret) ->
-        if TypTable.mem table ty then
-          Format.fprintf fmt "<cycle>"
+        if TypTable.mem table ty then Format.fprintf fmt "<cycle>"
         else begin
           TypTable.add table ty ();
           Format.fprintf fmt "(Fn ([";
@@ -694,8 +692,8 @@ module BuildInterferencePass (X86 : X86_2) = struct
         let non_pointer_locals =
           locals |> StringMap.bindings
           |> List.filter_map (function
-               | _, R3_Types.Vector _ -> None
-               | v, _ -> Some v)
+            | _, R3_Types.Vector _ -> None
+            | v, _ -> Some v)
         in
         let add_pointer_interferences var typ graph =
           match typ with
@@ -755,8 +753,7 @@ module AllocateRegistersPass (X86 : X86_2) = struct
     open Chapter2
     let reg_of_color root_stack_size stack_size color_slot_table regs typ color
         =
-      if color < Array.length regs then
-        X86.reg regs.(color)
+      if color < Array.length regs then X86.reg regs.(color)
       else
         match typ with
         | R3_Types.Vector _ ->

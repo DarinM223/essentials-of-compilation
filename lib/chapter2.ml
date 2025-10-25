@@ -625,20 +625,15 @@ module SelectInstructions (F : C0) (X86 : X86_0) = struct
     | If _ -> failwith "(read) cannot be a condition of if"
   let neg (v', arg) = function
     | Assign v ->
-      if Some v = v' then
-        X86.[ negq (var v) ]
-      else
-        X86.[ negq (var v); movq arg (var v) ]
+      if Some v = v' then X86.[ negq (var v) ]
+      else X86.[ negq (var v); movq arg (var v) ]
     | Return -> X86.[ negq (reg rax); movq arg (reg rax) ]
     | If _ -> failwith "neg() cannot be a condition of if"
   let ( + ) (v1, arg1) (v2, arg2) = function
     | Assign v ->
-      if Some v = v1 then
-        X86.[ addq arg2 (var v) ]
-      else if Some v = v2 then
-        X86.[ addq arg1 (var v) ]
-      else
-        X86.[ addq arg2 (var v); movq arg1 (var v) ]
+      if Some v = v1 then X86.[ addq arg2 (var v) ]
+      else if Some v = v2 then X86.[ addq arg1 (var v) ]
+      else X86.[ addq arg2 (var v); movq arg1 (var v) ]
     | Return -> X86.[ addq arg2 (reg rax); movq arg1 (reg rax) ]
     | If _ -> failwith "(+) cannot be a condition of if"
 
@@ -745,8 +740,7 @@ module PatchInstructionsPass (X86 : X86_0) = struct
         [ X86.(movq a (reg rax)); X86.(subq (reg rax) b) ]
       | _ -> X_instr.fwd @@ X86.subq a b
     let movq (info1, a) (info2, b) =
-      if ArgInfo.equal info1 info2 then
-        []
+      if ArgInfo.equal info1 info2 then []
       else
         match (info1, info2) with
         | MemoryReference _, MemoryReference _ ->
@@ -904,9 +898,10 @@ module X86_0_Printer_Helper (R : Chapter1.Reader) = struct
     match info.X86_Info.header_footer with
     | Some (_, footer) ->
       let footer = List.map (fun f -> f info) footer in
-      (match footer @ [ instr ] with
+      begin match footer @ [ instr ] with
       | head :: rest -> String.concat "\n" (head :: List.map indent rest)
-      | [] -> failwith "Empty instruction list with footer, this can't happen")
+      | [] -> failwith "Empty instruction list with footer, this can't happen"
+      end
     | None -> instr
 
   let retq = pop_stack_with_instr "retq"

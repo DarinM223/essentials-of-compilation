@@ -352,8 +352,7 @@ module RevealFunctions (F : F2) : R5_Shrink with type 'a obs = 'a F.obs = struct
   let var v is_function =
     if StringHashtbl.mem is_function (F.string_of_var v) then
       F.unsafe_vector [ F.string_of_var v ]
-    else
-      F.var v
+    else F.var v
   let define ty v params body rest is_function =
     StringHashtbl.add is_function (F.string_of_var v) ();
     let rest = rest is_function in
@@ -364,7 +363,7 @@ end
 let expand_closure_params m = function
   | head :: rest ->
     let rest_types = List.map (StringHashtbl.find m) rest in
-    (match StringHashtbl.find_opt m head with
+    begin match StringHashtbl.find_opt m head with
     | Some R3_Types.(Fn (Vector _ :: params, ret)) ->
       (* Expand existing function type to include closure params *)
       let rec fn_ty =
@@ -379,7 +378,8 @@ let expand_closure_params m = function
       in
       closure_ty
     | Some ty -> R3_Types.Vector (ty :: rest_types)
-    | None -> failwith "Can't find type for first parameter of unsafe_vector")
+    | None -> failwith "Can't find type for first parameter of unsafe_vector"
+    end
   | [] -> R3_Types.Vector []
 
 module R5_Annotate_Types (F : R5_Shrink) :

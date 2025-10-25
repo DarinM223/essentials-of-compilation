@@ -548,8 +548,7 @@ module TransformLetPass (F : R4) = struct
               (fun v ->
                 if Stdlib.( = ) x v then
                   F.vector_ref (F.var tuple_var) (Obj.magic ptr)
-                else
-                  old_handler v);
+                else old_handler v);
             go (xs, Chapter5.Next ptr)
           | [], _ -> ()
         in
@@ -625,8 +624,7 @@ module RevealFunctionsPass (F : F1) = struct
     let var v is_function =
       if StringHashtbl.mem is_function (F.string_of_var v) then
         F.fun_ref (F.string_of_var v)
-      else
-        F.var v
+      else F.var v
     let define ty v params body rest is_function =
       StringHashtbl.add is_function (F.string_of_var v) ();
       let rest = rest is_function in
@@ -814,11 +812,12 @@ module ExplicateControl (F : F1_Collect) (C3 : C3) () = struct
         e ann_id (Assign (F.string_of_var v, fun () -> go (es, vs)))
       | [], [] ->
         let args = args_of_vars_limit vs in
-        (match r with
+        begin match r with
         | Tail -> C3.(tailcall (var (lookup e)) args)
         | Assign (v, body) ->
           C3.(assign v (m.f (call (var (lookup e)) args)) @> body ())
-        | Pred _ -> failwith "Call should not be in an if expression")
+        | Pred _ -> failwith "Call should not be in an if expression"
+        end
     in
     let go : type r. r ExpLimitList.limit * r VarLimitList.limit -> unit C3.tail
         = function
@@ -1004,10 +1003,7 @@ module BuildInterferencePass (X86 : X86_3) = struct
           let ( let* ) a f = List.concat_map f a in
           let* r = caller_saves in
           let* v = ArgSet.to_list live_after in
-          if v <> arg_of_reg r then
-            [ (arg_of_reg r, v) ]
-          else
-            []
+          if v <> arg_of_reg r then [ (arg_of_reg r, v) ] else []
         in
         List.fold_left
           (fun graph (k, v) -> Chapter3.GraphUtils.add_interference k v graph)
@@ -1090,8 +1086,7 @@ module PatchInstructionsPass (X86 : X86_3) = struct
     let tail_jmp (info, arg) =
       if info = ArgInfo.HashedRegister (Hashtbl.hash X86.rax) then
         X_instr.fwd @@ X86.tail_jmp arg
-      else
-        X86.[ movq arg (reg rax); X86.tail_jmp (reg rax) ]
+      else X86.[ movq arg (reg rax); X86.tail_jmp (reg rax) ]
   end
 end
 module PatchInstructions (F : X86_3) : X86_3 with type 'a obs = 'a F.obs =
@@ -1229,10 +1224,8 @@ module X86_3_Printer_Helper (R : Chapter1.Reader with type t = X86_Info.t) :
     String.concat "\n"
       ((v ^ ":\n")
       ::
-      (if v = "main" then
-         program_helper stack_size root_stack_size blocks
-       else
-         function_helper stack_size root_stack_size blocks))
+      (if v = "main" then program_helper stack_size root_stack_size blocks
+       else function_helper stack_size root_stack_size blocks))
   let program defs = String.concat "\n" @@ [ ".global main"; ".text" ] @ defs
 end
 

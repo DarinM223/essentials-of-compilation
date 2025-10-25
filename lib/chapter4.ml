@@ -432,10 +432,8 @@ module SelectInstructions (F : C1) (X86 : X86_1) = struct
 
   let not (v', arg) = function
     | Assign v ->
-      if Some v = v' then
-        X86.[ xorq (int 1) (var v) ]
-      else
-        X86.[ xorq (int 1) (var v); movq arg (var v) ]
+      if Some v = v' then X86.[ xorq (int 1) (var v) ]
+      else X86.[ xorq (int 1) (var v); movq arg (var v) ]
     | Return -> X86.[ xorq (int 1) (reg rax); movq arg (reg rax) ]
     | If (t, f) -> X86.[ jmp f; jmp_if E t; cmpq (int 0) arg ]
   let ( = ) (_, arg1) (_, arg2) = function
@@ -467,10 +465,7 @@ module SelectInstructions (F : C1) (X86 : X86_1) = struct
     let c = ref (-1) in
     fun () ->
       incr c;
-      if Int.equal !c 0 then
-        "block_exit"
-      else
-        "block_exit" ^ string_of_int !c
+      if Int.equal !c 0 then "block_exit" else "block_exit" ^ string_of_int !c
   let program ?locals:_ body =
     let exit_label = fresh_exit_label () in
     let body =
@@ -586,9 +581,9 @@ module UncoverLivePass (X86 : X86_1) = struct
       List.iter go rev_topsort_labels;
       rev_topsort_labels |> List.rev
       |> List.filter_map (fun label ->
-             Option.map
-               (fun block -> (label, block))
-               (StringHashtbl.find_opt result_blocks label))
+          Option.map
+            (fun block -> (label, block))
+            (StringHashtbl.find_opt result_blocks label))
 
     let program ?stack_size ?conflicts ?moves blocks =
       let blocks = program_helper blocks in
@@ -626,10 +621,8 @@ module BuildInterferencePass (X86 : X86_1) = struct
         let acc_graph live_after graph =
           ArgSet.fold
             (fun v graph ->
-              if Some v = src || v = dest then
-                graph
-              else
-                Chapter3.GraphUtils.add_interference dest v graph)
+              if Some v = src || v = dest then graph
+              else Chapter3.GraphUtils.add_interference dest v graph)
             live_after graph
         in
         (acc_graph, X86.movzbq a b)
@@ -702,8 +695,7 @@ module PatchInstructionsPass (X86 : X86_1) = struct
       (* Destination with immediate *)
       | _ -> X86.[ movq b (reg rax); cmpq a (reg rax) ]
     let movzbq (info1, a) (info2, b) =
-      if ArgInfo.equal info1 info2 then
-        []
+      if ArgInfo.equal info1 info2 then []
       else
         match (info1, info2) with
         | MemoryReference _, MemoryReference _ ->
